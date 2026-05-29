@@ -1,6 +1,8 @@
 #include <intrin.h>
 #include "Common.h"
 
+#pragma intrinsic(__inbyte)
+#pragma intrinsic(__outbyte)
 #pragma intrinsic(__readcr3)
 #pragma intrinsic(__readmsr)
 #pragma intrinsic(__cpuidex)
@@ -97,6 +99,60 @@ static BOOLEAN CompareGuid(const EFI_GUID *A, const EFI_GUID *B) {
   }
   return 1;
 }
+
+#if SERIAL
+static VOID IoWait(VOID) { __outbyte(0x80, 0); }
+
+static VOID SerialInit(VOID) {
+  __outbyte(COM1_PORT + 1, 0x00);
+  __outbyte(COM1_PORT + 3, 0x80);
+  __outbyte(COM1_PORT + 0, 0x01);
+  __outbyte(COM1_PORT + 1, 0x00);
+  __outbyte(COM1_PORT + 3, 0x03);
+  __outbyte(COM1_PORT + 2, 0xC7);
+  __outbyte(COM1_PORT + 4, 0x0B);
+  IoWait();
+}
+
+static VOID SerialPutChar(char Ch) {
+  UINTN Guard = 100000;
+  if (Ch == '\n') {
+    SerialPutChar('\r');
+  }
+  while (((__inbyte(COM1_PORT + 5) & 0x20) == 0) && Guard--) {
+  }
+  __outbyte(COM1_PORT, (UINT8)Ch);
+}
+
+static VOID Log(const char *Text) {
+  while (*Text) {
+    SerialPutChar(*Text++);
+  }
+}
+
+static VOID LogHex(UINT64 Value) {
+  char Hex[] = "0123456789ABCDEF";
+  UINTN Shift = 60;
+  for (;;) {
+    SerialPutChar(Hex[(Value >> Shift) & 0xFU]);
+    if (Shift == 0) {
+      break;
+    }
+    Shift -= 4;
+  }
+}
+
+static VOID LogStatus(const char *Text, EFI_STATUS Status) {
+  Log(Text);
+  LogHex(Status);
+  Log("\n");
+}
+#else
+#define SerialInit()
+#define Log(Text)
+#define LogHex(Value)
+#define LogStatus(Text, Status)
+#endif
 
 static VOID WriteText(char *Out, UINTN OutSize, const char *Text) {
   UINTN Index;
@@ -930,27 +986,53 @@ static EFI_STATUS RegisterSwSmi(VOID) {
   EFI_STATUS Status;
 
   if (gSwHandle != 0) {
+    Log("smm sw smi already registered\n");
     return EFI_SUCCESS;
   }
   Locate = (EFI_LOCATE_PROTOCOL)gSmst->SmmLocateProtocol;
   Status = Locate(&gEfiSmmSwDispatch2ProtocolGuid, 0,
                   (VOID **)&SwDispatch);
   if (EFI_ERROR(Status) || SwDispatch == 0 || SwDispatch->Register == 0) {
+    LogStatus("smm sw dispatch unavailable ",
+              EFI_ERROR(Status) ? Status : EFI_NOT_FOUND);
     return EFI_ERROR(Status) ? Status : EFI_NOT_FOUND;
   }
   if ((UINTN)gSwSmiValue > SwDispatch->MaximumSwiValue) {
+    Log("smm sw value out of range max=0x");
+    LogHex(SwDispatch->MaximumSwiValue);
+    Log(" requested=0x");
+    LogHex(gSwSmiValue);
+    Log("\n");
     return EFI_INVALID_PARAMETER;
   }
   SwContext.SwSmiInputValue = gSwSmiValue;
   Status = SwDispatch->Register(SwDispatch, SwSmiHandler, &SwContext,
                                 &gSwHandle);
+  if (EFI_ERROR(Status)) {
+    LogStatus("smm sw smi register failed ", Status);
+  } else {
+    Log("smm sw smi registered value=0x");
+    LogHex(gSwSmiValue);
+    Log("\n");
+  }
   return Status;
 }
 
 static EFI_STATUS ValidateSmst(VOID) {
-  if (gSmst == 0 || gSmst->SmmLocateProtocol == 0 ||
-      gSmst->SmmIo.Mem.Read == 0 ||
-      gSmst->SmmIo.Mem.Write == 0) {
+  if (gSmst == 0) {
+    Log("smm smst missing\n");
+    return EFI_NOT_FOUND;
+  }
+  if (gSmst->SmmLocateProtocol == 0) {
+    Log("smm locate protocol missing\n");
+    return EFI_NOT_FOUND;
+  }
+  if (gSmst->SmmIo.Mem.Read == 0) {
+    Log("smm mem read missing\n");
+    return EFI_NOT_FOUND;
+  }
+  if (gSmst->SmmIo.Mem.Write == 0) {
+    Log("smm mem write missing\n");
     return EFI_NOT_FOUND;
   }
   return EFI_SUCCESS;
@@ -961,29 +1043,49 @@ static EFI_STATUS InitSmm(VOID) {
   EFI_STATUS Status;
 
   if (gSystemTable == 0 || gSystemTable->BootServices == 0) {
+    Log("smm system table invalid\n");
     return EFI_INVALID_PARAMETER;
   }
   Status = gSystemTable->BootServices->LocateProtocol(
       &gEfiSmmBase2ProtocolGuid, 0, (VOID **)&SmmBase);
   if (EFI_ERROR(Status) || SmmBase == 0) {
+    LogStatus("smm base2 unavailable ",
+              EFI_ERROR(Status) ? Status : EFI_NOT_FOUND);
     return EFI_ERROR(Status) ? Status : EFI_NOT_FOUND;
   }
   Status = SmmBase->GetSmstLocation(SmmBase, &gSmst);
   if (EFI_ERROR(Status)) {
+    LogStatus("smm get smst failed ", Status);
     return Status;
   }
   Status = ValidateSmst();
   if (EFI_ERROR(Status)) {
     return Status;
   }
+  Log("smm smst ok cpus=0x");
+  LogHex(gSmst->NumberOfCpus);
+  Log("\n");
   return EFI_SUCCESS;
 }
 
-static EFI_STATUS ApplyConfig(CONFIG *Config) {
+static EFI_STATUS ApplyConfig(CONFIG *Config, const char *Source) {
+  EFI_STATUS Status;
+
   if (Config == 0 ||
       Config->Magic != CONFIG_MAGIC ||
       Config->MailboxPhysical == 0 ||
       Config->MailboxSize < MAILBOX_SIZE) {
+    Log("smm config rejected from ");
+    Log(Source);
+    if (Config != 0) {
+      Log(" magic=0x");
+      LogHex(Config->Magic);
+      Log(" mailbox=0x");
+      LogHex(Config->MailboxPhysical);
+      Log(" size=0x");
+      LogHex(Config->MailboxSize);
+    }
+    Log("\n");
     return EFI_INVALID_PARAMETER;
   }
   gMailboxPhysical = Config->MailboxPhysical;
@@ -991,7 +1093,17 @@ static EFI_STATUS ApplyConfig(CONFIG *Config) {
   if (Config->SwSmiValue != 0) {
     gSwSmiValue = Config->SwSmiValue;
   }
-  return RegisterSwSmi();
+  Log("smm config from ");
+  Log(Source);
+  Log(" mailbox=0x");
+  LogHex(gMailboxPhysical);
+  Log(" size=0x");
+  LogHex(gMailboxSize);
+  Log(" sw=0x");
+  LogHex(gSwSmiValue);
+  Log("\n");
+  Status = RegisterSwSmi();
+  return Status;
 }
 
 static EFI_STATUS EFIAPI ConfigCommHandler(EFI_HANDLE DispatchHandle,
@@ -1001,18 +1113,29 @@ static EFI_STATUS EFIAPI ConfigCommHandler(EFI_HANDLE DispatchHandle,
   (void)DispatchHandle;
   (void)Context;
   (void)CommBufferSize;
-  return ApplyConfig((CONFIG *)CommBuffer);
+  Log("smm config comm received\n");
+  return ApplyConfig((CONFIG *)CommBuffer, "comm");
 }
 
 static EFI_STATUS RegisterConfigComm(VOID) {
+  EFI_STATUS Status;
+
   if (gCommHandle != 0) {
+    Log("smm config comm already registered\n");
     return EFI_SUCCESS;
   }
   if (gSmst->SmiHandlerRegister == 0) {
+    Log("smm config comm register unavailable\n");
     return EFI_NOT_FOUND;
   }
-  return gSmst->SmiHandlerRegister(ConfigCommHandler, &gConfigCommGuid,
-                                   &gCommHandle);
+  Status = gSmst->SmiHandlerRegister(ConfigCommHandler, &gConfigCommGuid,
+                                      &gCommHandle);
+  if (EFI_ERROR(Status)) {
+    LogStatus("smm config comm register failed ", Status);
+  } else {
+    Log("smm config comm registered\n");
+  }
+  return Status;
 }
 
 static EFI_STATUS ConfigureFromPublishedTable(VOID) {
@@ -1020,6 +1143,7 @@ static EFI_STATUS ConfigureFromPublishedTable(VOID) {
   UINTN Index;
 
   if (gSystemTable == 0 || gSystemTable->ConfigurationTable == 0) {
+    Log("smm published config table unavailable\n");
     return EFI_NOT_FOUND;
   }
   for (Index = 0; Index < gSystemTable->NumberOfTableEntries; Index++) {
@@ -1030,9 +1154,10 @@ static EFI_STATUS ConfigureFromPublishedTable(VOID) {
     }
   }
   if (Config == 0) {
+    Log("smm published config missing\n");
     return EFI_NOT_FOUND;
   }
-  return ApplyConfig(Config);
+  return ApplyConfig(Config, "published");
 }
 
 EFI_STATUS EFIAPI SmmEntry(EFI_HANDLE ImageHandle,
@@ -1041,11 +1166,19 @@ EFI_STATUS EFIAPI SmmEntry(EFI_HANDLE ImageHandle,
   (void)ImageHandle;
 
   gSystemTable = SystemTable;
+  SerialInit();
+  Log("mem smm init\n");
   Status = InitSmm();
   if (!EFI_ERROR(Status)) {
-    (void)RegisterConfigComm();
-    Status = ConfigureFromPublishedTable();
+    Status = RegisterConfigComm();
     (void)Status;
+    Status = ConfigureFromPublishedTable();
+    if (EFI_ERROR(Status)) {
+      LogStatus("smm published config failed ", Status);
+    }
+  } else {
+    LogStatus("smm init failed ", Status);
   }
+  Log("mem smm done\n");
   return EFI_SUCCESS;
 }

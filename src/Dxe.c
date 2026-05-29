@@ -1,5 +1,8 @@
+#include <intrin.h>
 #include "Common.h"
 
+#pragma intrinsic(__inbyte)
+#pragma intrinsic(__outbyte)
 #pragma function(memset)
 #pragma function(memcpy)
 
@@ -42,6 +45,7 @@ static EFI_EVENT gReadyToBootEvent;
 static EFI_EVENT gSmmCommEvent;
 static VOID *gSmmCommRegistration;
 static UINT32 gConfigured;
+static UINT32 gConfigureAttempts;
 static CONFIG gPublishedConfig;
 static UINT8 gSsdt[512];
 
@@ -95,6 +99,60 @@ static BOOLEAN CompareGuid(const EFI_GUID *A, const EFI_GUID *B) {
   }
   return 1;
 }
+
+#if SERIAL
+static VOID IoWait(VOID) { __outbyte(0x80, 0); }
+
+static VOID SerialInit(VOID) {
+  __outbyte(COM1_PORT + 1, 0x00);
+  __outbyte(COM1_PORT + 3, 0x80);
+  __outbyte(COM1_PORT + 0, 0x01);
+  __outbyte(COM1_PORT + 1, 0x00);
+  __outbyte(COM1_PORT + 3, 0x03);
+  __outbyte(COM1_PORT + 2, 0xC7);
+  __outbyte(COM1_PORT + 4, 0x0B);
+  IoWait();
+}
+
+static VOID SerialPutChar(char Ch) {
+  UINTN Guard = 100000;
+  if (Ch == '\n') {
+    SerialPutChar('\r');
+  }
+  while (((__inbyte(COM1_PORT + 5) & 0x20) == 0) && Guard--) {
+  }
+  __outbyte(COM1_PORT, (UINT8)Ch);
+}
+
+static VOID Log(const char *Text) {
+  while (*Text) {
+    SerialPutChar(*Text++);
+  }
+}
+
+static VOID LogHex(UINT64 Value) {
+  char Hex[] = "0123456789ABCDEF";
+  UINTN Shift = 60;
+  for (;;) {
+    SerialPutChar(Hex[(Value >> Shift) & 0xFU]);
+    if (Shift == 0) {
+      break;
+    }
+    Shift -= 4;
+  }
+}
+
+static VOID LogStatus(const char *Text, EFI_STATUS Status) {
+  Log(Text);
+  LogHex(Status);
+  Log("\n");
+}
+#else
+#define SerialInit()
+#define Log(Text)
+#define LogHex(Value)
+#define LogStatus(Text, Status)
+#endif
 
 static UINT32 Signature32(char A, char B, char C, char D) {
   return (UINT32)(UINT8)A | ((UINT32)(UINT8)B << 8) |
@@ -321,14 +379,25 @@ static EFI_STATUS InstallWmi(VOID) {
   Status = gSystemTable->BootServices->LocateProtocol(
       &gEfiAcpiTableProtocolGuid, 0, (VOID **)&AcpiTable);
   if (EFI_ERROR(Status) || AcpiTable == 0) {
+    LogStatus("dxe acpi protocol failed ",
+              EFI_ERROR(Status) ? Status : EFI_NOT_FOUND);
     return EFI_ERROR(Status) ? Status : EFI_NOT_FOUND;
   }
   TableSize = BuildSsdt(gSsdt, sizeof(gSsdt));
   if (TableSize == 0) {
+    Log("dxe ssdt build failed\n");
     return EFI_OUT_OF_RESOURCES;
   }
+  Log("dxe ssdt size=0x");
+  LogHex(TableSize);
+  Log("\n");
   Status = AcpiTable->InstallAcpiTable(AcpiTable, gSsdt, TableSize,
                                        &TableKey);
+  if (EFI_ERROR(Status)) {
+    LogStatus("dxe ssdt install failed ", Status);
+  } else {
+    Log("dxe ssdt installed\n");
+  }
   return Status;
 }
 
@@ -348,13 +417,17 @@ static EFI_STATUS PublishConfig(VOID) {
   return Status;
 }
 
-static VOID *FindSmmCommRegion(UINTN RequiredSize, UINT32 *OriginalType) {
+static VOID *FindSmmCommRegion(UINTN RequiredSize, UINT32 *OriginalType,
+                               BOOLEAN LogIt) {
   EDKII_PI_SMM_COMMUNICATION_REGION_TABLE *Table = 0;
   UINT8 *Entry;
   UINTN Index;
 
   *OriginalType = 0xFFFFFFFFU;
   if (gSystemTable == 0 || gSystemTable->ConfigurationTable == 0) {
+    if (LogIt) {
+      Log("dxe config table unavailable\n");
+    }
     return 0;
   }
   for (Index = 0; Index < gSystemTable->NumberOfTableEntries; Index++) {
@@ -367,6 +440,19 @@ static VOID *FindSmmCommRegion(UINTN RequiredSize, UINT32 *OriginalType) {
   }
   if (Table == 0 || Table->Version != 1 || Table->NumberOfEntries == 0 ||
       Table->DescriptorSize < sizeof(EFI_MEMORY_DESCRIPTOR)) {
+    if (LogIt) {
+      if (Table == 0) {
+        Log("dxe smm comm region table missing\n");
+      } else {
+        Log("dxe smm comm region table rejected version=0x");
+        LogHex(Table->Version);
+        Log(" entries=0x");
+        LogHex(Table->NumberOfEntries);
+        Log(" desc=0x");
+        LogHex(Table->DescriptorSize);
+        Log("\n");
+      }
+    }
     return 0;
   }
   Entry = (UINT8 *)(Table + 1);
@@ -382,11 +468,23 @@ static VOID *FindSmmCommRegion(UINTN RequiredSize, UINT32 *OriginalType) {
         Desc->Type == EFI_ACPI_MEMORY_NVS ||
         Desc->Type == EFI_CONVENTIONAL_MEMORY) {
       *OriginalType = Desc->Type;
+      if (LogIt) {
+        Log("dxe smm comm region base=0x");
+        LogHex(Desc->PhysicalStart);
+        Log(" size=0x");
+        LogHex(Bytes);
+        Log(" type=0x");
+        LogHex(*OriginalType);
+        Log("\n");
+      }
       if (Desc->Type == EFI_CONVENTIONAL_MEMORY) {
         Desc->Type = EFI_RESERVED_MEMORY_TYPE;
       }
       return (VOID *)(UINTN)Desc->PhysicalStart;
     }
+  }
+  if (LogIt) {
+    Log("dxe no usable smm comm region\n");
   }
   return 0;
 }
@@ -428,17 +526,33 @@ static EFI_STATUS ConfigureSmm(VOID) {
   CONFIG *Config;
   VOID *CommBuffer;
   UINT32 OriginalRegionType;
+  UINT32 Attempt;
+  BOOLEAN LogIt;
   EFI_STATUS Status;
   UINTN CommSize;
 
+  Attempt = ++gConfigureAttempts;
+  LogIt = (Attempt <= 3);
+  if (LogIt) {
+    Log("dxe configure smm attempt=0x");
+    LogHex(Attempt);
+    Log("\n");
+  }
   Status = gSystemTable->BootServices->LocateProtocol(
       &gEfiSmmCommunicationProtocolGuid, 0, (VOID **)&SmmComm);
   if (EFI_ERROR(Status) || SmmComm == 0) {
+    if (LogIt) {
+      LogStatus("dxe smm communication unavailable ",
+                EFI_ERROR(Status) ? Status : EFI_NOT_FOUND);
+    }
     return EFI_ERROR(Status) ? Status : EFI_NOT_FOUND;
   }
   CommSize = sizeof(EFI_SMM_COMMUNICATE_HEADER) + sizeof(CONFIG) + 16;
-  CommBuffer = FindSmmCommRegion(CommSize, &OriginalRegionType);
+  CommBuffer = FindSmmCommRegion(CommSize, &OriginalRegionType, LogIt);
   if (CommBuffer == 0) {
+    if (LogIt) {
+      Log("dxe smm configure no comm buffer\n");
+    }
     return EFI_NOT_FOUND;
   }
   ZeroMem(CommBuffer, CommSize);
@@ -454,6 +568,12 @@ static EFI_STATUS ConfigureSmm(VOID) {
   RestoreSmmCommRegionType(CommBuffer, OriginalRegionType);
   if (!EFI_ERROR(Status)) {
     gConfigured = 1;
+    Log("dxe smm configure ok\n");
+  } else if (LogIt) {
+    LogStatus("dxe smm communicate failed ", Status);
+    Log("dxe smm communicate size=0x");
+    LogHex(CommSize);
+    Log("\n");
   }
   return Status;
 }
@@ -470,6 +590,11 @@ static VOID EFIAPI RetryConfigureSmm(EFI_EVENT Event, VOID *Context) {
   if (!EFI_ERROR(Status) && gRetryTimerEvent != 0) {
     Status = gSystemTable->BootServices->SetTimer(gRetryTimerEvent,
                                                   TimerCancel, 0);
+    if (EFI_ERROR(Status)) {
+      LogStatus("dxe retry timer cancel failed ", Status);
+    } else {
+      Log("dxe retry timer canceled\n");
+    }
     (void)Status;
   }
 }
@@ -485,6 +610,7 @@ static VOID RegisterRetryTimer(VOID) {
       &gRetryTimerEvent);
   if (EFI_ERROR(Status)) {
     gRetryTimerEvent = 0;
+    LogStatus("dxe retry timer create failed ", Status);
     return;
   }
   Status = gSystemTable->BootServices->SetTimer(gRetryTimerEvent,
@@ -492,6 +618,9 @@ static VOID RegisterRetryTimer(VOID) {
   if (EFI_ERROR(Status)) {
     gSystemTable->BootServices->CloseEvent(gRetryTimerEvent);
     gRetryTimerEvent = 0;
+    LogStatus("dxe retry timer start failed ", Status);
+  } else {
+    Log("dxe retry timer registered\n");
   }
 }
 
@@ -506,6 +635,7 @@ static VOID RegisterSmmCommNotify(VOID) {
       &gSmmCommEvent);
   if (EFI_ERROR(Status)) {
     gSmmCommEvent = 0;
+    LogStatus("dxe smm communication notify create failed ", Status);
     return;
   }
   Status = gSystemTable->BootServices->RegisterProtocolNotify(
@@ -514,6 +644,9 @@ static VOID RegisterSmmCommNotify(VOID) {
   if (EFI_ERROR(Status)) {
     gSystemTable->BootServices->CloseEvent(gSmmCommEvent);
     gSmmCommEvent = 0;
+    LogStatus("dxe smm communication notify failed ", Status);
+  } else {
+    Log("dxe smm communication notify registered\n");
   }
 }
 
@@ -522,6 +655,9 @@ static VOID RegisterReadyToBootRetry(VOID) {
 
   if (gReadyToBootEvent != 0 || gConfigured != 0 ||
       gSystemTable->BootServices->CreateEventEx == 0) {
+    if (gSystemTable->BootServices->CreateEventEx == 0) {
+      Log("dxe ready retry unavailable\n");
+    }
     return;
   }
   Status = gSystemTable->BootServices->CreateEventEx(
@@ -529,6 +665,9 @@ static VOID RegisterReadyToBootRetry(VOID) {
       &gEfiEventReadyToBootGuid, &gReadyToBootEvent);
   if (EFI_ERROR(Status)) {
     gReadyToBootEvent = 0;
+    LogStatus("dxe ready retry failed ", Status);
+  } else {
+    Log("dxe ready retry registered\n");
   }
 }
 
@@ -538,17 +677,36 @@ EFI_STATUS EFIAPI DxeEntry(EFI_HANDLE ImageHandle,
   (void)ImageHandle;
 
   gSystemTable = SystemTable;
+  SerialInit();
+  Log("mem dxe init\n");
   Status = AllocateMailbox();
   if (EFI_ERROR(Status)) {
+    LogStatus("dxe mailbox failed ", Status);
     return EFI_SUCCESS;
   }
-  (void)PublishConfig();
-  (void)InstallWmi();
+  Log("dxe mailbox base=0x");
+  LogHex(gMailboxPhysical);
+  Log(" size=0x");
+  LogHex(MAILBOX_SIZE);
+  Log(" sw=0x");
+  LogHex(SW_SMI_VALUE);
+  Log("\n");
+  Status = PublishConfig();
+  if (EFI_ERROR(Status)) {
+    LogStatus("dxe config publish failed ", Status);
+  } else {
+    Log("dxe config published\n");
+  }
+  Status = InstallWmi();
+  if (EFI_ERROR(Status)) {
+    LogStatus("dxe wmi install failed ", Status);
+  }
   Status = ConfigureSmm();
   if (EFI_ERROR(Status)) {
     RegisterRetryTimer();
     RegisterReadyToBootRetry();
     RegisterSmmCommNotify();
   }
+  Log("mem dxe done\n");
   return EFI_SUCCESS;
 }
