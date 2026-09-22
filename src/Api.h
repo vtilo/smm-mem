@@ -23,25 +23,30 @@ typedef struct {
   char Name[NAME_SIZE];
 } MODULE_INFO;
 
-typedef int (*DUMP_CALLBACK)(uint64_t Address, const void *Data,
-                             uint32_t Size, void *Context);
+/* Chunk sizes may vary. Return zero to stop streaming. */
+typedef int ( *DUMP_CALLBACK )( uint64_t address, const void *data, uint32_t size, void *context );
 
-int Init(void);
-void Close(void);
-int Ping(void);
-int FindProcessByPid(uint32_t Pid, PROCESS_INFO *Process);
-int FindProcessByName(const char *Name, PROCESS_INFO *Process);
-int TranslateVirt(uint32_t Pid, uint64_t Va, uint64_t *Pa);
-int ReadPhys(uint64_t Address, void *Buffer, uint32_t Size);
-int WritePhys(uint64_t Address, const void *Buffer, uint32_t Size);
-int ReadVirt(uint32_t Pid, uint64_t Address, void *Buffer, uint32_t Size);
-int WriteVirt(uint32_t Pid, uint64_t Address, const void *Buffer,
-              uint32_t Size);
-int FindModule(const PROCESS_INFO *Process, const char *Name,
-               MODULE_INFO *Module);
-int FindKernelModule(const char *Name, MODULE_INFO *Module);
-int FindExport(const MODULE_INFO *Module, const char *Name,
-               uint64_t *Address);
-int Dump(const MODULE_INFO *Module, DUMP_CALLBACK Callback, void *Context);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int Init( void );
+void Close( void );
+int Ping( void );
+int FindProcessByPid( uint32_t pid, PROCESS_INFO *process );
+int FindProcessByName( const char *name, PROCESS_INFO *process );
+int TranslateVirt( uint32_t pid, uint64_t address, uint64_t *physical );
+int ReadPhys( uint64_t address, void *buffer, uint32_t size );
+int WritePhys( uint64_t address, const void *buffer, uint32_t size );
+int ReadVirt( uint32_t pid, uint64_t address, void *buffer, uint32_t size );
+int WriteVirt( uint32_t pid, uint64_t address, const void *buffer, uint32_t size );
+int FindModule( const PROCESS_INFO *process, const char *name, MODULE_INFO *module );
+int FindKernelModule( const char *name, MODULE_INFO *module );
+int FindExport( const MODULE_INFO *module, const char *name, uint64_t *address );
+int Dump( const MODULE_INFO *module, DUMP_CALLBACK callback, void *context );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

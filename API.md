@@ -2,7 +2,9 @@
 
 All public functions are declared in `src\Api.h`. The implementation is in `src\Client.c`.
 
-To use the API from your own program, include `Api.h` and compile `Client.c` with `API_ONLY` defined:
+To use the API from your own program, include `Api.h` and compile `Client.c` with `API_ONLY` defined.
+
+When copying the client sources into another project, keep `src/client/`, `src/shared/protocol.h`, `Api.h`, and `Client.c` in the same relative layout. Only `Client.c` needs to be compiled.
 
 ```bat
 cl /nologo /W4 /O2 /DAPI_ONLY my_app.c src\Client.c
@@ -17,6 +19,18 @@ Names are ASCII strings and are compared case-insensitively.
 Current public name buffers are limited to `NAME_SIZE`, which is 64 bytes including the null terminator.
 
 Large read and write requests are chunked automatically by the usermode client. If you are using the API normally, you do not need to care about the internal WMI packet size.
+
+## Transport and lifetime
+
+The library serializes its transport state within a process. Firmware ACPI methods serialize access to the shared mailbox across callers. A large read or write can contain several requests and is not an atomic snapshot.
+
+Keep the caller's buffers valid until the API returns. The optional fast path owns its own locked staging page; it does not lock or change the residency of the caller's buffers. If fast-path negotiation or staging allocation is unavailable, calls retain the legacy transport.
+
+`Dump()` callback chunk sizes may vary up to a page. Consume the supplied `Size` rather than assuming a fixed chunk length.
+
+Define `SMM_DISABLE_FAST` when compiling `Client.c` to force the legacy transport. The default negotiates the fast endpoint and falls back when it is unavailable.
+
+A failed transfer may have completed earlier chunks. Writes are not automatically replayed after an ambiguous transport failure. Each firmware transfer is limited to 4 KiB so a large API call does not become one unbounded SMM operation.
 
 ## Types
 

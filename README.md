@@ -11,6 +11,16 @@ https://github.com/user-attachments/assets/08513a12-0f89-47c3-982a-565fa84a9a5b
 
 The project consists of two firmware components: `Dxe.efi` for the ACPI WMI doorbell and mailbox setup, and `Smm.efi` for the actual memory API running inside SMM.
 
+## Source layout
+
+- `src/Smm.c` and `src/Dxe.c` are the firmware entry points.
+- `src/smm/` contains physical/virtual memory access, process discovery, exports, and request dispatch.
+- `src/dxe/` contains ACPI table construction, mailbox setup, and deferred initialization.
+- `src/shared/` defines the shared wire protocol and UEFI interfaces; `Common.h` exposes common firmware helpers.
+- `src/client/` contains the usermode transport and API implementation. `Client.c` remains a single-file entry for applications built with `API_ONLY`.
+
+The public API remains driverless. Updated firmware and clients can negotiate a compact WMI endpoint and a private, locked transfer buffer. Older firmware or unavailable fast-path resources use the original transport automatically. Each firmware transfer is bounded to 4 KiB; large application reads are split without requiring callers to change their code.
+
 ## API
 
 ```c
@@ -36,7 +46,9 @@ FindExport(&module, "PsInitialSystemProcess", &address);
 Dump(&module, callback, context);
 ```
 
-To use the API in your own application, include `Api.h` and compile `Client.c` with `API_ONLY` defined:
+To use the API in your own application, include `Api.h` and compile `Client.c` with `API_ONLY` defined.
+
+When copying the client sources into another project, keep `src/client/`, `src/shared/protocol.h`, `Api.h`, and `Client.c` in the same relative layout. Only `Client.c` needs to be compiled.
 
 ```bat
 cl /nologo /W4 /O2 /DAPI_ONLY my_app.c src\Client.c
