@@ -2,7 +2,7 @@
 #define SMM_MEM_PROTOCOL_H
 
 #include <stdint.h>
-#include "../Api.h"
+#include "api/api.h"
 
 #define MEMORY_WMI_GUID                                                                            \
   { 0xa0c9f8de, 0x0b71, 0x42a8, { 0xb9, 0x67, 0xe5, 0x38, 0xea, 0xcb, 0x6f, 0x21 } }

@@ -1,4 +1,4 @@
-#include "../Common.h"
+#include "common.h"
 
 #pragma intrinsic( __inbyte )
 #pragma intrinsic( __outbyte )

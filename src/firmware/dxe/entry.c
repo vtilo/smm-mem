@@ -1,4 +1,4 @@
-#include "dxe/internal.h"
+#include "internal.h"
 
 DxeState dxe;
 

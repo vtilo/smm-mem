@@ -5,7 +5,7 @@
 
 ## About
 
-SmmMem allows a normal usermode application to read, write, translate, and resolve Windows memory through an SMM handler running in ring -2. The client side does not require a custom kernel driver. Usermode talks to ACPI WMI, ACPI rings a software SMI, and the SMM driver handles the memory request.
+SmmMem exposes a source-only Windows API for reading, writing, translating, and resolving memory through an SMM handler running in ring -2. The API does not require a custom kernel driver. Usermode talks to ACPI WMI, ACPI rings a software SMI, and the SMM module handles the memory request.
 
 https://github.com/user-attachments/assets/08513a12-0f89-47c3-982a-565fa84a9a5b
 
@@ -13,13 +13,15 @@ The project consists of two firmware components: `Dxe.efi` for the ACPI WMI door
 
 ## Source layout
 
-- `src/Smm.c` and `src/Dxe.c` are the firmware entry points.
-- `src/smm/` contains physical/virtual memory access, process discovery, exports, and request dispatch.
-- `src/dxe/` contains ACPI table construction, mailbox setup, and deferred initialization.
-- `src/shared/` defines the shared wire protocol and UEFI interfaces; `Common.h` exposes common firmware helpers.
-- `src/client/` contains the usermode transport and API implementation. `Client.c` remains a single-file entry for applications built with `API_ONLY`.
+- `src/api/api.h` is the public API header; compile `src/api/api.c` into your application.
+- `src/api/internal/` contains the private transport and API implementation.
+- `src/firmware/dxe/` sets up the ACPI WMI interface and shared mailbox during boot.
+- `src/firmware/smm/` handles memory requests, process discovery, modules, and exports.
+- `src/firmware/common/` contains shared firmware helpers and UEFI declarations.
+- `src/protocol.h` defines the request and response format used by the API and firmware.
+- `tests/` contains explicit VM-only smoke tests and benchmarks.
 
-The public API remains driverless. Updated firmware and clients can negotiate a compact WMI endpoint and a private, locked transfer buffer. Older firmware or unavailable fast-path resources use the original transport automatically. Each firmware transfer is bounded to 4 KiB; large application reads are split without requiring callers to change their code.
+The API and firmware can negotiate a compact WMI endpoint and a private, locked transfer buffer. Older firmware or unavailable fast-path resources use the original transport automatically. Each firmware transfer is bounded to 4 KiB; large application reads are split without requiring callers to change their code.
 
 ## API
 
@@ -28,48 +30,48 @@ Init();
 Close();
 Ping();
 
-FindProcessByPid(pid, &process);
-FindProcessByName("notepad.exe", &process);
+FindProcessByPid( Pid, &Process );
+FindProcessByName( "notepad.exe", &Process );
 
-TranslateVirt(pid, va, &pa);
+TranslateVirt( Pid, Va, &Pa );
 
-ReadVirt(pid, va, buffer, size);
-WriteVirt(pid, va, buffer, size);
+ReadVirt( Pid, Va, Buffer, Size );
+WriteVirt( Pid, Va, Buffer, Size );
 
-ReadPhys(pa, buffer, size);
-WritePhys(pa, buffer, size);
+ReadPhys( Pa, Buffer, Size );
+WritePhys( Pa, Buffer, Size );
 
-FindModule(&process, "module.dll", &module);
-FindKernelModule("ntoskrnl.exe", &module);
-FindExport(&module, "PsInitialSystemProcess", &address);
+FindModule( &Process, "module.dll", &Module );
+FindKernelModule( "ntoskrnl.exe", &Module );
+FindExport( &Module, "PsInitialSystemProcess", &Address );
 
-Dump(&module, callback, context);
+Dump( &Module, Callback, Context );
 ```
 
-To use the API in your own application, include `Api.h` and compile `Client.c` with `API_ONLY` defined.
+To use the API, include `api.h` and compile `src/api/api.c` into your application. It always builds as API implementation code and has no application entry point.
 
-When copying the client sources into another project, keep `src/client/`, `src/shared/protocol.h`, `Api.h`, and `Client.c` in the same relative layout. Only `Client.c` needs to be compiled.
+When copying the API sources into another project, keep `src/api/` and `src/protocol.h` in the same relative layout. Only `api.c` needs to be compiled; the `.inl` files are included privately.
 
 ```bat
-cl /nologo /W4 /O2 /DAPI_ONLY my_app.c src\Client.c
+cl /nologo /W4 /O2 /I src\api my_app.c src\api\api.c
 ```
 
-`Client.exe` is only a small sanity-check tool. Your own application should link against `Client.c` directly.
+The default build produces only `Dxe.efi` and `Smm.efi`. Smoke tests and benchmarks are separate development targets run inside a VM; see [tests/README.md](tests/README.md).
 
 Full API documentation is available in [API.md](API.md).
 
 ## Support
 
 * x64 UEFI firmware with AMI Aptio V style PI SMM support
-* Windows 10 or Windows 11 for the Windows client
+* Windows 10 or Windows 11 for the API
 * Tested on an ASUS AM5 platform with AMI Aptio V firmware
 
 ## Usage
 
-1. Open an [x64 Visual Studio developer command prompt](https://learn.microsoft.com/en-us/visualstudio/ide/reference/command-prompt-powershell?view=visualstudio) and run `src\build.cmd`
+1. Open an [x64 Visual Studio developer command prompt](https://learn.microsoft.com/en-us/visualstudio/ide/reference/command-prompt-powershell?view=visualstudio) and run `build.cmd`
 2. Add `Dxe.efi` and `Smm.efi` to your firmware and flash it onto your board. Easiest way is to replace existing DXE and SMM modules (check out the [general UEFITool guide](https://winraid.level1techs.com/t/guide-howto-extract-insert-replace-efi-bios-modules/32122))
-3. Boot Windows and run `Client.exe ping` to check whether the ACPI WMI doorbell and SMM handler are reachable
-4. Build your own usermode application with `Api.h` and `Client.c`, then call the API functions directly
+3. Build your application with `src/api/api.h` and `src/api/api.c`.
+4. Boot Windows and call `Init()` followed by `Ping()` to check whether the firmware is reachable, then use the remaining API functions.
 
 This project requires firmware modification. Flashing a bad image can brick your motherboard. Use only on hardware you can recover and only if you understand what you are replacing.
 

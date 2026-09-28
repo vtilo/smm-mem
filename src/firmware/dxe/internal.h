@@ -1,7 +1,7 @@
 #ifndef DXE_PRIVATE_H
 #define DXE_PRIVATE_H
 
-#include "../Common.h"
+#include "../common/common.h"
 
 typedef struct {
   UINT32 Signature;

@@ -1,13 +1,13 @@
 # API
 
-All public functions are declared in `src\Api.h`. The implementation is in `src\Client.c`.
+All public functions are declared in `src/api/api.h`. Compile `src/api/api.c` into your application to provide their implementation.
 
-To use the API from your own program, include `Api.h` and compile `Client.c` with `API_ONLY` defined.
+Include `api.h` from your own program. The implementation always builds as API code; it has no application entry point or executable target.
 
-When copying the client sources into another project, keep `src/client/`, `src/shared/protocol.h`, `Api.h`, and `Client.c` in the same relative layout. Only `Client.c` needs to be compiled.
+When copying the API sources into another project, keep `src/api/` and `src/protocol.h` in the same relative layout. Only `api.c` needs to be compiled; its `.inl` files remain private implementation details.
 
 ```bat
-cl /nologo /W4 /O2 /DAPI_ONLY my_app.c src\Client.c
+cl /nologo /W4 /O2 /I src\api my_app.c src\api\api.c
 ```
 
 Every API function returning `int` returns nonzero on success and `0` on failure. `Close()` has no return value.
@@ -18,7 +18,7 @@ Names are ASCII strings and are compared case-insensitively.
 
 Current public name buffers are limited to `NAME_SIZE`, which is 64 bytes including the null terminator.
 
-Large read and write requests are chunked automatically by the usermode client. If you are using the API normally, you do not need to care about the internal WMI packet size.
+Large read and write requests are chunked automatically by the API. Callers can pass the complete range without handling the internal WMI packet size.
 
 ## Transport and lifetime
 
@@ -28,7 +28,7 @@ Keep the caller's buffers valid until the API returns. The optional fast path ow
 
 `Dump()` callback chunk sizes may vary up to a page. Consume the supplied `Size` rather than assuming a fixed chunk length.
 
-Define `SMM_DISABLE_FAST` when compiling `Client.c` to force the legacy transport. The default negotiates the fast endpoint and falls back when it is unavailable.
+Define `SMM_DISABLE_FAST` when compiling `api.c` to force the legacy transport. The default negotiates the fast endpoint and falls back when it is unavailable.
 
 A failed transfer may have completed earlier chunks. Writes are not automatically replayed after an ambiguous transport failure. Each firmware transfer is limited to 4 KiB so a large API call does not become one unbounded SMM operation.
 
@@ -205,7 +205,7 @@ Reads virtual memory from a target process.
 
 Returns nonzero if the full range was read successfully.
 
-The client automatically splits larger reads into small requests. The SMM side translates each page and handles ranges that cross page boundaries.
+The API automatically splits larger reads into bounded requests. The SMM side translates each page and handles ranges that cross page boundaries.
 
 ## WriteVirt
 
@@ -225,7 +225,7 @@ Writes virtual memory into a target process.
 
 Returns nonzero if the full range was written successfully.
 
-The client automatically splits larger writes into small requests. The SMM side translates each page and writes to the resulting physical memory.
+The API automatically splits larger writes into bounded requests. The SMM side translates each page and writes to the resulting physical memory.
 
 ## ReadPhys
 

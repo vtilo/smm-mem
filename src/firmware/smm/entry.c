@@ -1,4 +1,4 @@
-#include "smm/internal.h"
+#include "internal.h"
 
 SmmState smm = { 0 };
 

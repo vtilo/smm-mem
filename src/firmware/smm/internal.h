@@ -2,7 +2,7 @@
 #define SMM_PRIVATE_H
 
 #include <intrin.h>
-#include "../Common.h"
+#include "../common/common.h"
 
 #pragma intrinsic( __inbyte )
 #pragma intrinsic( __outbyte )
