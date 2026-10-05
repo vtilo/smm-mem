@@ -89,10 +89,10 @@ typedef struct {
 } TRANSFER_BUFFER;
 #pragma pack( pop )
 
-typedef char requestLayoutCheck[sizeof( REQUEST ) == 49 ? 1 : -1];
-typedef char responseLayoutCheck[sizeof( RESPONSE ) == 388 ? 1 : -1];
-typedef char configLayoutCheck[sizeof( CONFIG ) == 32 ? 1 : -1];
-typedef char configExtendedLayoutCheck[sizeof( CONFIG_EXTENDED ) == 48 ? 1 : -1];
-typedef char transferBufferLayoutCheck[sizeof( TRANSFER_BUFFER ) == 12 ? 1 : -1];
+typedef char RequestLayoutCheck[sizeof( REQUEST ) == 49 ? 1 : -1];
+typedef char ResponseLayoutCheck[sizeof( RESPONSE ) == 388 ? 1 : -1];
+typedef char ConfigLayoutCheck[sizeof( CONFIG ) == 32 ? 1 : -1];
+typedef char ConfigExtendedLayoutCheck[sizeof( CONFIG_EXTENDED ) == 48 ? 1 : -1];
+typedef char TransferBufferLayoutCheck[sizeof( TRANSFER_BUFFER ) == 12 ? 1 : -1];
 
 #endif

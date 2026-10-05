@@ -1,261 +1,273 @@
-static void closeFastClient( void ) {
-  if ( client.staging != NULL ) {
-    VirtualUnlock( client.staging, BUFFER_TRANSFER_SIZE );
-    VirtualFree( client.staging, 0, MEM_RELEASE );
-    client.staging = NULL;
+static void CloseFastTransport( void ) {
+  if ( Api.Staging != NULL ) {
+    VirtualUnlock( Api.Staging, BUFFER_TRANSFER_SIZE );
+    VirtualFree( Api.Staging, 0, MEM_RELEASE );
+    Api.Staging = NULL;
   }
 
-  if ( client.fastBlock != NULL ) {
-    client.closeBlock( client.fastBlock );
-    client.fastBlock = NULL;
+  if ( Api.FastBlock != NULL ) {
+    Api.CloseBlock( Api.FastBlock );
+    Api.FastBlock = NULL;
   }
 
-  client.fastAvailable = 0;
-  client.fastInstance = FAST_WMI_INSTANCE_COUNT;
+  Api.FastAvailable = 0;
+  Api.FastInstance = FAST_WMI_INSTANCE_COUNT;
 }
 
-static void closeClient( void ) {
-  closeFastClient();
+static void CloseTransport( void ) {
+  CloseFastTransport();
 
-  if ( client.closeBlock != NULL && client.block != NULL ) {
-    client.closeBlock( client.block );
+  if ( Api.CloseBlock != NULL && Api.Block != NULL ) {
+    Api.CloseBlock( Api.Block );
   }
 
-  if ( client.library != NULL ) {
-    FreeLibrary( client.library );
+  if ( Api.Library != NULL ) {
+    FreeLibrary( Api.Library );
   }
 
-  ZeroMemory( &client, sizeof( client ) );
-  client.instance = WMI_INSTANCE_COUNT;
-  client.fastInstance = FAST_WMI_INSTANCE_COUNT;
+  ZeroMemory( &Api, sizeof( Api ) );
+  Api.Instance = WMI_INSTANCE_COUNT;
+  Api.FastInstance = FAST_WMI_INSTANCE_COUNT;
 }
 
-static int openClient( void ) {
-  closeClient();
+static int OpenTransport( void ) {
+  CloseTransport();
 
-  client.library = LoadLibraryW( L"Advapi32.dll" );
-  if ( client.library == NULL ) {
+  Api.Library = LoadLibraryW( L"Advapi32.dll" );
+
+  if ( Api.Library == NULL ) {
     return 0;
   }
 
-  client.openBlock = ( WmiOpenBlockFn )GetProcAddress( client.library, "WmiOpenBlock" );
-  client.executeMethod =
-    ( WmiExecuteMethodFn )GetProcAddress( client.library, "WmiExecuteMethodW" );
-  client.closeBlock = ( WmiCloseBlockFn )GetProcAddress( client.library, "WmiCloseBlock" );
+  Api.OpenBlock = ( WmiOpenBlockFn )GetProcAddress( Api.Library, "WmiOpenBlock" );
+  Api.ExecuteMethod = ( WmiExecuteMethodFn )GetProcAddress( Api.Library, "WmiExecuteMethodW" );
+  Api.CloseBlock = ( WmiCloseBlockFn )GetProcAddress( Api.Library, "WmiCloseBlock" );
 
-  if ( client.openBlock == NULL || client.executeMethod == NULL || client.closeBlock == NULL ) {
-    closeClient();
+  if ( Api.OpenBlock == NULL || Api.ExecuteMethod == NULL || Api.CloseBlock == NULL ) {
+    CloseTransport();
     return 0;
   }
 
-  ULONG status = client.openBlock( &memoryGuid, WMI_GUID_EXECUTE, &client.block );
-  if ( status != ERROR_SUCCESS ) {
-    closeClient();
+  ULONG Status = Api.OpenBlock( &MemoryGuid, WMI_GUID_EXECUTE, &Api.Block );
+
+  if ( Status != ERROR_SUCCESS ) {
+    CloseTransport();
     return 0;
   }
 
-  client.pid = GetCurrentProcessId();
-  client.sequence = GetTickCount64();
+  Api.Pid = GetCurrentProcessId();
+  Api.Sequence = GetTickCount64();
+
   return 1;
 }
 
 int Init( void ) {
-  AcquireSRWLockExclusive( &clientLock );
-  int success = openClient();
-  ReleaseSRWLockExclusive( &clientLock );
+  AcquireSRWLockExclusive( &ApiLock );
+  int Success = OpenTransport();
+  ReleaseSRWLockExclusive( &ApiLock );
 
-  return success;
+  return Success;
 }
 
 void Close( void ) {
-  AcquireSRWLockExclusive( &clientLock );
-  closeClient();
-  ReleaseSRWLockExclusive( &clientLock );
+  AcquireSRWLockExclusive( &ApiLock );
+  CloseTransport();
+  ReleaseSRWLockExclusive( &ApiLock );
 }
 
-static void requestInit( REQUEST *request, uint32_t command ) {
-  ZeroMemory( request, REQUEST_SIZE );
-  request->Magic = REQ_MAGIC;
-  request->Command = command;
+static void InitRequest( REQUEST *Request, uint32_t Command ) {
+  ZeroMemory( Request, REQUEST_SIZE );
+  Request->Magic = REQ_MAGIC;
+  Request->Command = Command;
 }
 
-static int executeRequest( HANDLE block,
-  const wchar_t *instance,
-  uint32_t inputSize,
-  uint32_t responseSize,
-  REQUEST *request,
-  RESPONSE *response ) {
-  uint8_t output[RESPONSE_SIZE];
-  ULONG outputSize = responseSize;
-  ZeroMemory( output, sizeof( output ) );
+static int ExecuteRequest( HANDLE Block,
+  const wchar_t *Instance,
+  uint32_t InputSize,
+  uint32_t ResponseSize,
+  REQUEST *Request,
+  RESPONSE *Response ) {
+  uint8_t Output[RESPONSE_SIZE];
+  ULONG OutputSize = ResponseSize;
 
-  ULONG status =
-    client.executeMethod( block, instance, WMI_METHOD_ID, inputSize, request, &outputSize, output );
-  if ( status != ERROR_SUCCESS ) {
-    /* Only missing destinations prove that a write was never dispatched. */
-    return status == ERROR_WMI_GUID_NOT_FOUND || status == ERROR_WMI_INSTANCE_NOT_FOUND ? -1 : 0;
+  ZeroMemory( Output, sizeof( Output ) );
+
+  ULONG Status =
+    Api.ExecuteMethod( Block, Instance, WMI_METHOD_ID, InputSize, Request, &OutputSize, Output );
+
+  if ( Status != ERROR_SUCCESS ) {
+    // Only missing destinations prove that a write was never dispatched
+    return Status == ERROR_WMI_GUID_NOT_FOUND || Status == ERROR_WMI_INSTANCE_NOT_FOUND ? -1 : 0;
   }
 
-  if ( outputSize < offsetof( RESPONSE, Data ) || outputSize > responseSize ) {
+  if ( OutputSize < offsetof( RESPONSE, Data ) || OutputSize > ResponseSize ) {
     return 0;
   }
 
-  CopyMemory( response, output, sizeof( *response ) );
-  if ( response->Magic != RESP_MAGIC || response->Command != request->Command ||
-       response->Sequence != request->Sequence || response->DataSize > RESPONSE_DATA_SIZE ||
-       outputSize < offsetof( RESPONSE, Data ) + response->DataSize ) {
+  CopyMemory( Response, Output, sizeof( *Response ) );
+
+  if ( Response->Magic != RESP_MAGIC || Response->Command != Request->Command ||
+       Response->Sequence != Request->Sequence || Response->DataSize > RESPONSE_DATA_SIZE ||
+       OutputSize < offsetof( RESPONSE, Data ) + Response->DataSize ) {
     return 0;
   }
 
   return 1;
 }
 
-static int sendBlock( HANDLE block,
-  const wchar_t *const *instances,
-  size_t count,
-  size_t *selected,
-  uint32_t inputSize,
-  uint32_t responseSize,
-  REQUEST *request,
-  RESPONSE *response ) {
-  request->Sequence = ++client.sequence;
+static int SendBlock( HANDLE Block,
+  const wchar_t *const *Instances,
+  size_t Count,
+  size_t *Selected,
+  uint32_t InputSize,
+  uint32_t ResponseSize,
+  REQUEST *Request,
+  RESPONSE *Response ) {
+  Request->Sequence = ++Api.Sequence;
 
-  /* Remember discovery, but fall back if the firmware instance disappears. */
-  size_t previous = *selected;
-  if ( previous < count ) {
-    int result =
-      executeRequest( block, instances[previous], inputSize, responseSize, request, response );
-    if ( result >= 0 ) {
-      return result;
+  size_t Previous = *Selected;
+
+  if ( Previous < Count ) {
+    int Result =
+      ExecuteRequest( Block, Instances[Previous], InputSize, ResponseSize, Request, Response );
+
+    if ( Result >= 0 ) {
+      return Result;
     }
 
-    *selected = count;
+    *Selected = Count;
   }
 
-  for ( size_t index = 0; index < count; index++ ) {
-    if ( index == previous ) {
+  for ( size_t Index = 0; Index < Count; Index++ ) {
+    if ( Index == Previous ) {
       continue;
     }
 
-    int result =
-      executeRequest( block, instances[index], inputSize, responseSize, request, response );
-    if ( result < 0 ) {
+    int Result =
+      ExecuteRequest( Block, Instances[Index], InputSize, ResponseSize, Request, Response );
+
+    if ( Result < 0 ) {
       continue;
     }
 
-    if ( result != 0 ) {
-      *selected = index;
+    if ( Result != 0 ) {
+      *Selected = Index;
     }
 
-    return result;
+    return Result;
   }
 
   return 0;
 }
 
-static int sendLegacy( REQUEST *request, RESPONSE *response ) {
-  return sendBlock( client.block,
-    memoryInstances,
+static int SendLegacy( REQUEST *Request, RESPONSE *Response ) {
+  return SendBlock( Api.Block,
+    MemoryInstances,
     WMI_INSTANCE_COUNT,
-    &client.instance,
+    &Api.Instance,
     REQUEST_SIZE,
     RESPONSE_SIZE,
-    request,
-    response );
+    Request,
+    Response );
 }
 
-static int sendFast( REQUEST *request, RESPONSE *response ) {
-  return sendBlock( client.fastBlock,
-    fastMemoryInstances,
+static int SendFast( REQUEST *Request, RESPONSE *Response ) {
+  return SendBlock( Api.FastBlock,
+    FastMemoryInstances,
     FAST_WMI_INSTANCE_COUNT,
-    &client.fastInstance,
+    &Api.FastInstance,
     FAST_REQUEST_SIZE,
     FAST_RESPONSE_SIZE,
-    request,
-    response );
+    Request,
+    Response );
 }
 
-static int prepareFastClient( void ) {
+static int PrepareFastTransport( void ) {
 #ifdef SMM_DISABLE_FAST
   return 0;
 #else
-  if ( client.fastChecked || client.block == NULL ) {
-    return client.fastAvailable;
+
+  if ( Api.FastChecked || Api.Block == NULL ) {
+    return Api.FastAvailable;
   }
 
-  uint8_t input[REQUEST_SIZE];
-  REQUEST *request = ( REQUEST * )input;
-  RESPONSE response;
-  requestInit( request, PING );
+  uint8_t Input[REQUEST_SIZE];
+  REQUEST *Request = ( REQUEST * )Input;
+  RESPONSE Response;
 
-  if ( !sendLegacy( request, &response ) || response.Status != STATUS_OK ) {
+  InitRequest( Request, PING );
+
+  if ( !SendLegacy( Request, &Response ) || Response.Status != STATUS_OK ) {
     return 0;
   }
 
-  client.fastChecked = 1;
-  if ( response.Result != FAST_CAPABILITY ) {
+  Api.FastChecked = 1;
+
+  if ( Response.Result != FAST_CAPABILITY ) {
     return 0;
   }
 
-  if ( client.openBlock( &fastMemoryGuid, WMI_GUID_EXECUTE, &client.fastBlock ) != ERROR_SUCCESS ) {
-    client.fastBlock = NULL;
+  if ( Api.OpenBlock( &FastMemoryGuid, WMI_GUID_EXECUTE, &Api.FastBlock ) != ERROR_SUCCESS ) {
+    Api.FastBlock = NULL;
     return 0;
   }
 
-  if ( !sendFast( request, &response ) || response.Status != STATUS_OK ||
-       response.Result != FAST_CAPABILITY ) {
-    closeFastClient();
+  if ( !SendFast( Request, &Response ) || Response.Status != STATUS_OK ||
+       Response.Result != FAST_CAPABILITY ) {
+    CloseFastTransport();
     return 0;
   }
 
-  client.fastAvailable = 1;
-  client.staging = ( uint8_t * )VirtualAlloc(
+  Api.FastAvailable = 1;
+  Api.Staging = ( uint8_t * )VirtualAlloc(
     NULL, BUFFER_TRANSFER_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
-  if ( client.staging != NULL && !VirtualLock( client.staging, BUFFER_TRANSFER_SIZE ) ) {
-    VirtualFree( client.staging, 0, MEM_RELEASE );
-    client.staging = NULL;
+
+  if ( Api.Staging != NULL && !VirtualLock( Api.Staging, BUFFER_TRANSFER_SIZE ) ) {
+    VirtualFree( Api.Staging, 0, MEM_RELEASE );
+    Api.Staging = NULL;
   }
 
   return 1;
 #endif
 }
 
-static int fastRequestFits( const REQUEST *request ) {
-  switch ( request->Command ) {
+static int FitsFastRequest( const REQUEST *Request ) {
+  switch ( Request->Command ) {
   case PING:
   case TRANSLATE_VIRT:
-    return request->DataSize == 0;
+    return Request->DataSize == 0;
   case READ_PHYS:
-    return request->Arg2 <= FAST_INLINE_READ_SIZE;
+    return Request->Arg2 <= FAST_INLINE_READ_SIZE;
   case READ_VIRT:
-    return request->Arg3 <= FAST_INLINE_READ_SIZE;
+    return Request->Arg3 <= FAST_INLINE_READ_SIZE;
   case WRITE_PHYS:
   case WRITE_VIRT:
-    return request->DataSize <= FAST_INLINE_WRITE_SIZE;
+    return Request->DataSize <= FAST_INLINE_WRITE_SIZE;
   case READ_VIRT_BUFFER:
   case WRITE_VIRT_BUFFER:
   case READ_PHYS_BUFFER:
   case WRITE_PHYS_BUFFER:
-    return request->DataSize == sizeof( TRANSFER_BUFFER );
+    return Request->DataSize == sizeof( TRANSFER_BUFFER );
   default:
     return 0;
   }
 }
 
-static int requestSend( REQUEST *request, RESPONSE *response ) {
-  if ( client.block == NULL ) {
+static int SendRequest( REQUEST *Request, RESPONSE *Response ) {
+  if ( Api.Block == NULL ) {
     return 0;
   }
 
-  if ( fastRequestFits( request ) && prepareFastClient() ) {
-    int success = sendFast( request, response );
-    if ( !success ) {
-      /* Do not retry an operation which may already have performed a write. */
-      closeFastClient();
+  if ( FitsFastRequest( Request ) && PrepareFastTransport() ) {
+    int Success = SendFast( Request, Response );
+
+    if ( !Success ) {
+      // Do not retry an operation which may already have performed a write
+      CloseFastTransport();
     }
 
-    return success;
+    return Success;
   }
 
-  return sendLegacy( request, response );
+  return SendLegacy( Request, Response );
 }

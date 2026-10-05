@@ -1,31 +1,32 @@
-int Dump( const MODULE_INFO *module, DUMP_CALLBACK callback, void *context ) {
-  if ( module == NULL || module->Pid == 0 || module->Base == 0 || module->Size == 0 ||
-       module->Base > UINT64_MAX - ( module->Size - 1 ) ) {
+int Dump( const MODULE_INFO *Module, DUMP_CALLBACK Callback, void *Context ) {
+  if ( Module == NULL || Module->Pid == 0 || Module->Base == 0 || Module->Size == 0 ||
+       Module->Base > UINT64_MAX - ( Module->Size - 1 ) ) {
     return 0;
   }
 
-  uint8_t buffer[BUFFER_TRANSFER_SIZE];
-  uint64_t done = 0;
+  uint8_t Buffer[BUFFER_TRANSFER_SIZE];
+  uint64_t Done = 0;
 
-  while ( done < module->Size ) {
-    uint64_t address = module->Base + done;
-    uint64_t remaining = module->Size - done;
-    uint32_t chunk =
-      remaining > sizeof( buffer ) ? ( uint32_t )sizeof( buffer ) : ( uint32_t )remaining;
-    uint32_t pageLeft = 0x1000U - ( uint32_t )( address & 0xFFFU );
-    if ( chunk > pageLeft ) {
-      chunk = pageLeft;
+  while ( Done < Module->Size ) {
+    uint64_t Address = Module->Base + Done;
+    uint64_t Remaining = Module->Size - Done;
+    uint32_t Chunk =
+      Remaining > sizeof( Buffer ) ? ( uint32_t )sizeof( Buffer ) : ( uint32_t )Remaining;
+    uint32_t PageLeft = 0x1000U - ( uint32_t )( Address & 0xFFFU );
+
+    if ( Chunk > PageLeft ) {
+      Chunk = PageLeft;
     }
 
-    if ( !ReadVirt( module->Pid, address, buffer, chunk ) ) {
-      ZeroMemory( buffer, chunk );
+    if ( !ReadVirt( Module->Pid, Address, Buffer, Chunk ) ) {
+      ZeroMemory( Buffer, Chunk );
     }
 
-    if ( callback != NULL && !callback( address, buffer, chunk, context ) ) {
+    if ( Callback != NULL && !Callback( Address, Buffer, Chunk, Context ) ) {
       return 0;
     }
 
-    done += chunk;
+    Done += Chunk;
   }
 
   return 1;

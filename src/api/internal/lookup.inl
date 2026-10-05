@@ -1,140 +1,155 @@
-static uint32_t nameSize( const char *name, uint32_t capacity ) {
-  if ( name == NULL ) {
+static uint32_t GetNameSize( const char *Name, uint32_t Capacity ) {
+  if ( Name == NULL ) {
     return 0;
   }
 
-  for ( uint32_t index = 0; index < capacity; index++ ) {
-    if ( name[index] == 0 ) {
-      return index + 1;
+  for ( uint32_t Index = 0; Index < Capacity; Index++ ) {
+    if ( Name[Index] == 0 ) {
+      return Index + 1;
     }
   }
 
   return 0;
 }
 
-static int queryName(
-  uint32_t command, uint32_t pid, const char *name, void *result, uint32_t resultSize ) {
-  uint32_t size = nameSize( name, RESPONSE_DATA_SIZE );
-  if ( size == 0 || result == NULL ) {
+static int QueryName(
+  uint32_t Command, uint32_t Pid, const char *Name, void *Result, uint32_t ResultSize ) {
+  uint32_t Size = GetNameSize( Name, RESPONSE_DATA_SIZE );
+
+  if ( Size == 0 || Result == NULL ) {
     return 0;
   }
 
-  uint8_t input[REQUEST_SIZE];
-  REQUEST *request = ( REQUEST * )input;
-  RESPONSE response;
-  requestInit( request, command );
-  request->Arg1 = pid;
-  request->DataSize = size;
-  CopyMemory( request->Data, name, size );
+  uint8_t Input[REQUEST_SIZE];
+  REQUEST *Request = ( REQUEST * )Input;
+  RESPONSE Response;
 
-  AcquireSRWLockExclusive( &clientLock );
-  int success = requestSend( request, &response ) && response.Status == STATUS_OK &&
-                response.DataSize >= resultSize;
-  if ( success ) {
-    CopyMemory( result, response.Data, resultSize );
+  InitRequest( Request, Command );
+  Request->Arg1 = Pid;
+  Request->DataSize = Size;
+  CopyMemory( Request->Data, Name, Size );
+
+  AcquireSRWLockExclusive( &ApiLock );
+  int Success = SendRequest( Request, &Response ) && Response.Status == STATUS_OK &&
+                Response.DataSize >= ResultSize;
+
+  if ( Success ) {
+    CopyMemory( Result, Response.Data, ResultSize );
   }
 
-  ReleaseSRWLockExclusive( &clientLock );
-  return success;
+  ReleaseSRWLockExclusive( &ApiLock );
+
+  return Success;
 }
 
 int Ping( void ) {
-  uint8_t input[REQUEST_SIZE];
-  REQUEST *request = ( REQUEST * )input;
-  RESPONSE response;
-  requestInit( request, PING );
+  uint8_t Input[REQUEST_SIZE];
+  REQUEST *Request = ( REQUEST * )Input;
+  RESPONSE Response;
 
-  AcquireSRWLockExclusive( &clientLock );
-  int success = requestSend( request, &response ) && response.Status == STATUS_OK;
-  ReleaseSRWLockExclusive( &clientLock );
+  InitRequest( Request, PING );
 
-  return success;
+  AcquireSRWLockExclusive( &ApiLock );
+  int Success = SendRequest( Request, &Response ) && Response.Status == STATUS_OK;
+  ReleaseSRWLockExclusive( &ApiLock );
+
+  return Success;
 }
 
-int FindProcessByPid( uint32_t pid, PROCESS_INFO *process ) {
-  if ( process == NULL ) {
+int FindProcessByPid( uint32_t Pid, PROCESS_INFO *Process ) {
+  if ( Process == NULL ) {
     return 0;
   }
 
-  uint8_t input[REQUEST_SIZE];
-  REQUEST *request = ( REQUEST * )input;
-  RESPONSE response;
-  requestInit( request, FIND_PROCESS_PID );
-  request->Arg1 = pid;
+  uint8_t Input[REQUEST_SIZE];
+  REQUEST *Request = ( REQUEST * )Input;
+  RESPONSE Response;
 
-  AcquireSRWLockExclusive( &clientLock );
-  int success = requestSend( request, &response ) && response.Status == STATUS_OK &&
-                response.DataSize >= sizeof( *process );
-  if ( success ) {
-    CopyMemory( process, response.Data, sizeof( *process ) );
+  InitRequest( Request, FIND_PROCESS_PID );
+  Request->Arg1 = Pid;
+
+  AcquireSRWLockExclusive( &ApiLock );
+  int Success = SendRequest( Request, &Response ) && Response.Status == STATUS_OK &&
+                Response.DataSize >= sizeof( *Process );
+
+  if ( Success ) {
+    CopyMemory( Process, Response.Data, sizeof( *Process ) );
   }
 
-  ReleaseSRWLockExclusive( &clientLock );
-  return success;
+  ReleaseSRWLockExclusive( &ApiLock );
+
+  return Success;
 }
 
-int FindProcessByName( const char *name, PROCESS_INFO *process ) {
-  return queryName( FIND_PROCESS_NAME, 0, name, process, sizeof( *process ) );
+int FindProcessByName( const char *Name, PROCESS_INFO *Process ) {
+  return QueryName( FIND_PROCESS_NAME, 0, Name, Process, sizeof( *Process ) );
 }
 
-int TranslateVirt( uint32_t pid, uint64_t address, uint64_t *physical ) {
-  if ( physical == NULL ) {
+int TranslateVirt( uint32_t Pid, uint64_t Address, uint64_t *Physical ) {
+  if ( Physical == NULL ) {
     return 0;
   }
 
-  uint8_t input[REQUEST_SIZE];
-  REQUEST *request = ( REQUEST * )input;
-  RESPONSE response;
-  requestInit( request, TRANSLATE_VIRT );
-  request->Arg1 = pid;
-  request->Arg2 = address;
+  uint8_t Input[REQUEST_SIZE];
+  REQUEST *Request = ( REQUEST * )Input;
+  RESPONSE Response;
 
-  AcquireSRWLockExclusive( &clientLock );
-  int success = requestSend( request, &response ) && response.Status == STATUS_OK;
-  if ( success ) {
-    *physical = response.Result;
+  InitRequest( Request, TRANSLATE_VIRT );
+  Request->Arg1 = Pid;
+  Request->Arg2 = Address;
+
+  AcquireSRWLockExclusive( &ApiLock );
+  int Success = SendRequest( Request, &Response ) && Response.Status == STATUS_OK;
+
+  if ( Success ) {
+    *Physical = Response.Result;
   }
 
-  ReleaseSRWLockExclusive( &clientLock );
-  return success;
+  ReleaseSRWLockExclusive( &ApiLock );
+
+  return Success;
 }
 
-int FindModule( const PROCESS_INFO *process, const char *name, MODULE_INFO *module ) {
-  if ( process == NULL ) {
+int FindModule( const PROCESS_INFO *Process, const char *Name, MODULE_INFO *Module ) {
+  if ( Process == NULL ) {
     return 0;
   }
 
-  return queryName( FIND_MODULE, process->Pid, name, module, sizeof( *module ) );
+  return QueryName( FIND_MODULE, Process->Pid, Name, Module, sizeof( *Module ) );
 }
 
-int FindKernelModule( const char *name, MODULE_INFO *module ) {
-  return queryName( FIND_KERNEL_MODULE, 0, name, module, sizeof( *module ) );
+int FindKernelModule( const char *Name, MODULE_INFO *Module ) {
+  return QueryName( FIND_KERNEL_MODULE, 0, Name, Module, sizeof( *Module ) );
 }
 
-int FindExport( const MODULE_INFO *module, const char *name, uint64_t *address ) {
-  if ( module == NULL || address == NULL ) {
+int FindExport( const MODULE_INFO *Module, const char *Name, uint64_t *Address ) {
+  if ( Module == NULL || Address == NULL ) {
     return 0;
   }
 
-  uint32_t size = nameSize( name, RESPONSE_DATA_SIZE - sizeof( *module ) );
-  if ( size == 0 ) {
+  uint32_t Size = GetNameSize( Name, RESPONSE_DATA_SIZE - sizeof( *Module ) );
+
+  if ( Size == 0 ) {
     return 0;
   }
 
-  uint8_t input[REQUEST_SIZE];
-  REQUEST *request = ( REQUEST * )input;
-  RESPONSE response;
-  requestInit( request, FIND_EXPORT );
-  request->DataSize = ( uint32_t )sizeof( *module ) + size;
-  CopyMemory( request->Data, module, sizeof( *module ) );
-  CopyMemory( request->Data + sizeof( *module ), name, size );
+  uint8_t Input[REQUEST_SIZE];
+  REQUEST *Request = ( REQUEST * )Input;
+  RESPONSE Response;
 
-  AcquireSRWLockExclusive( &clientLock );
-  int success = requestSend( request, &response ) && response.Status == STATUS_OK;
-  if ( success ) {
-    *address = response.Result;
+  InitRequest( Request, FIND_EXPORT );
+  Request->DataSize = ( uint32_t )sizeof( *Module ) + Size;
+  CopyMemory( Request->Data, Module, sizeof( *Module ) );
+  CopyMemory( Request->Data + sizeof( *Module ), Name, Size );
+
+  AcquireSRWLockExclusive( &ApiLock );
+  int Success = SendRequest( Request, &Response ) && Response.Status == STATUS_OK;
+
+  if ( Success ) {
+    *Address = Response.Result;
   }
 
-  ReleaseSRWLockExclusive( &clientLock );
-  return success;
+  ReleaseSRWLockExclusive( &ApiLock );
+
+  return Success;
 }

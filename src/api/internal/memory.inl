@@ -1,5 +1,5 @@
-static uint32_t bufferCommand( uint32_t command ) {
-  switch ( command ) {
+static uint32_t GetBufferCommand( uint32_t Command ) {
+  switch ( Command ) {
   case READ_VIRT:
     return READ_VIRT_BUFFER;
   case WRITE_VIRT:
@@ -11,97 +11,102 @@ static uint32_t bufferCommand( uint32_t command ) {
   }
 }
 
-static int transferMemory(
-  uint32_t command, uint32_t pid, uint64_t address, void *buffer, uint32_t size ) {
-  if ( size == 0 ) {
+static int TransferMemory(
+  uint32_t Command, uint32_t Pid, uint64_t Address, void *Buffer, uint32_t Size ) {
+  if ( Size == 0 ) {
     return 1;
   }
 
-  if ( buffer == NULL || address > UINT64_MAX - ( size - 1U ) ) {
+  if ( Buffer == NULL || Address > UINT64_MAX - ( Size - 1U ) ) {
     return 0;
   }
 
-  uint8_t input[REQUEST_SIZE];
-  REQUEST *request = ( REQUEST * )input;
-  RESPONSE response;
-  uint32_t done = 0;
-  uint32_t previousSize = 0;
-  int physical = command == READ_PHYS || command == WRITE_PHYS;
-  int writing = command == WRITE_PHYS || command == WRITE_VIRT;
-  int success = 1;
+  uint8_t Input[REQUEST_SIZE];
+  REQUEST *Request = ( REQUEST * )Input;
+  RESPONSE Response;
+  uint32_t Done = 0;
+  uint32_t PreviousSize = 0;
+  int Physical = Command == READ_PHYS || Command == WRITE_PHYS;
+  int Writing = Command == WRITE_PHYS || Command == WRITE_VIRT;
+  int Success = 1;
 
-  AcquireSRWLockExclusive( &clientLock );
-  prepareFastClient();
+  AcquireSRWLockExclusive( &ApiLock );
+  PrepareFastTransport();
 
-  uint32_t inlineSize = writing ? FAST_INLINE_WRITE_SIZE : FAST_INLINE_READ_SIZE;
-  int buffered = client.fastAvailable && client.staging != NULL && size > inlineSize;
-  uint32_t capacity = buffered ? BUFFER_TRANSFER_SIZE : RESPONSE_DATA_SIZE;
+  uint32_t InlineSize = Writing ? FAST_INLINE_WRITE_SIZE : FAST_INLINE_READ_SIZE;
+  int Buffered = Api.FastAvailable && Api.Staging != NULL && Size > InlineSize;
+  uint32_t Capacity = Buffered ? BUFFER_TRANSFER_SIZE : RESPONSE_DATA_SIZE;
 
-  /* Keep unused wire bytes zero without clearing 4 KiB for every chunk. */
-  requestInit( request, buffered ? bufferCommand( command ) : command );
-  if ( buffered ) {
-    TRANSFER_BUFFER *transfer = ( TRANSFER_BUFFER * )request->Data;
-    request->DataSize = sizeof( *transfer );
-    transfer->Pid = client.pid;
-    transfer->Address = ( uint64_t )( uintptr_t )client.staging;
+  // Keep unused wire bytes zero without clearing 4 KiB for every chunk
+  InitRequest( Request, Buffered ? GetBufferCommand( Command ) : Command );
+
+  if ( Buffered ) {
+    TRANSFER_BUFFER *Transfer = ( TRANSFER_BUFFER * )Request->Data;
+
+    Request->DataSize = sizeof( *Transfer );
+    Transfer->Pid = Api.Pid;
+    Transfer->Address = ( uint64_t )( uintptr_t )Api.Staging;
   }
 
-  while ( done < size ) {
-    uint32_t chunk = size - done;
-    if ( chunk > capacity ) {
-      chunk = capacity;
+  while ( Done < Size ) {
+    uint32_t Chunk = Size - Done;
+
+    if ( Chunk > Capacity ) {
+      Chunk = Capacity;
     }
 
-    request->Arg1 = physical ? address + done : pid;
-    request->Arg2 = physical ? chunk : address + done;
-    request->Arg3 = physical ? 0 : chunk;
+    Request->Arg1 = Physical ? Address + Done : Pid;
+    Request->Arg2 = Physical ? Chunk : Address + Done;
+    Request->Arg3 = Physical ? 0 : Chunk;
 
-    if ( writing ) {
-      if ( buffered ) {
-        CopyMemory( client.staging, ( const uint8_t * )buffer + done, chunk );
+    if ( Writing ) {
+      if ( Buffered ) {
+        CopyMemory( Api.Staging, ( const uint8_t * )Buffer + Done, Chunk );
       } else {
-        request->DataSize = chunk;
-        CopyMemory( request->Data, ( const uint8_t * )buffer + done, chunk );
-        if ( chunk < previousSize ) {
-          ZeroMemory( request->Data + chunk, previousSize - chunk );
+        Request->DataSize = Chunk;
+        CopyMemory( Request->Data, ( const uint8_t * )Buffer + Done, Chunk );
+
+        if ( Chunk < PreviousSize ) {
+          ZeroMemory( Request->Data + Chunk, PreviousSize - Chunk );
         }
 
-        previousSize = chunk;
-        request->Arg2 = physical ? 0 : address + done;
-        request->Arg3 = 0;
+        PreviousSize = Chunk;
+        Request->Arg2 = Physical ? 0 : Address + Done;
+        Request->Arg3 = 0;
       }
     }
 
-    if ( !requestSend( request, &response ) || response.Status != STATUS_OK ||
-         ( buffered && response.Result != chunk ) ||
-         ( !buffered && !writing && response.DataSize != chunk ) ) {
-      success = 0;
+    if ( !SendRequest( Request, &Response ) || Response.Status != STATUS_OK ||
+         ( Buffered && Response.Result != Chunk ) ||
+         ( !Buffered && !Writing && Response.DataSize != Chunk ) ) {
+      Success = 0;
       break;
     }
 
-    if ( !writing ) {
-      CopyMemory( ( uint8_t * )buffer + done, buffered ? client.staging : response.Data, chunk );
+    if ( !Writing ) {
+      CopyMemory( ( uint8_t * )Buffer + Done, Buffered ? Api.Staging : Response.Data, Chunk );
     }
 
-    done += chunk;
+    Done += Chunk;
   }
 
-  ReleaseSRWLockExclusive( &clientLock );
-  return success;
+  ReleaseSRWLockExclusive( &ApiLock );
+
+  return Success;
 }
 
-int ReadPhys( uint64_t address, void *buffer, uint32_t size ) {
-  return transferMemory( READ_PHYS, 0, address, buffer, size );
+int ReadPhys( uint64_t Address, void *Buffer, uint32_t Size ) {
+  return TransferMemory( READ_PHYS, 0, Address, Buffer, Size );
 }
 
-int WritePhys( uint64_t address, const void *buffer, uint32_t size ) {
-  return transferMemory( WRITE_PHYS, 0, address, ( void * )buffer, size );
+int WritePhys( uint64_t Address, const void *Buffer, uint32_t Size ) {
+  return TransferMemory( WRITE_PHYS, 0, Address, ( void * )Buffer, Size );
 }
 
-int ReadVirt( uint32_t pid, uint64_t address, void *buffer, uint32_t size ) {
-  return transferMemory( READ_VIRT, pid, address, buffer, size );
+int ReadVirt( uint32_t Pid, uint64_t Address, void *Buffer, uint32_t Size ) {
+  return TransferMemory( READ_VIRT, Pid, Address, Buffer, Size );
 }
 
-int WriteVirt( uint32_t pid, uint64_t address, const void *buffer, uint32_t size ) {
-  return transferMemory( WRITE_VIRT, pid, address, ( void * )buffer, size );
+int WriteVirt( uint32_t Pid, uint64_t Address, const void *Buffer, uint32_t Size ) {
+  return TransferMemory( WRITE_VIRT, Pid, Address, ( void * )Buffer, Size );
 }
