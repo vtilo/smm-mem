@@ -8,20 +8,20 @@
 #pragma intrinsic( __movsb )
 #pragma intrinsic( __stosb )
 
-static __forceinline VOID memoryCopy( VOID *destination, const VOID *source, UINTN size ) {
-  __movsb( ( UINT8 * )destination, ( const UINT8 * )source, size );
+static __forceinline VOID MemoryCopy( VOID *Destination, const VOID *Source, UINTN Size ) {
+  __movsb( ( UINT8 * )Destination, ( const UINT8 * )Source, Size );
 }
 
-static __forceinline VOID memoryClear( VOID *buffer, UINTN size ) {
-  __stosb( ( UINT8 * )buffer, 0, size );
+static __forceinline VOID MemoryClear( VOID *Buffer, UINTN Size ) {
+  __stosb( ( UINT8 * )Buffer, 0, Size );
 }
 
-static __forceinline BOOLEAN guidEqual( const EFI_GUID *left, const EFI_GUID *right ) {
-  const UINT8 *a = ( const UINT8 * )left;
-  const UINT8 *b = ( const UINT8 * )right;
+static __forceinline BOOLEAN GuidEqual( const EFI_GUID *Left, const EFI_GUID *Right ) {
+  const UINT8 *A = ( const UINT8 * )Left;
+  const UINT8 *B = ( const UINT8 * )Right;
 
-  for ( UINTN i = 0; i < sizeof( EFI_GUID ); i++ ) {
-    if ( a[i] != b[i] ) {
+  for ( UINTN I = 0; I < sizeof( EFI_GUID ); I++ ) {
+    if ( A[I] != B[I] ) {
       return 0;
     }
   }
@@ -29,18 +29,36 @@ static __forceinline BOOLEAN guidEqual( const EFI_GUID *left, const EFI_GUID *ri
   return 1;
 }
 
-VOID serialInit( VOID );
-VOID logText( const char *text );
-VOID logHex( UINT64 value );
-VOID logStatus( const char *text, EFI_STATUS status );
+VOID SerialInit( VOID );
+VOID LogText( const char *Text );
+VOID LogHex( UINT64 Value );
+VOID LogStatus( const char *Text, EFI_STATUS Status );
 
-extern EFI_GUID configCommGuid;
-extern EFI_GUID wmiGuid;
-extern EFI_GUID configGuid;
-extern EFI_GUID smmBase2Guid;
-extern EFI_GUID smmSwDispatchGuid;
-extern EFI_GUID smmCommunicationGuid;
-extern EFI_GUID acpiTableGuid;
-extern EFI_GUID fastWmiGuid;
+extern EFI_GUID ConfigCommGuid;
+extern EFI_GUID WmiGuid;
+extern EFI_GUID ConfigGuid;
+extern EFI_GUID SmmBase2Guid;
+extern EFI_GUID SmmSwDispatchGuid;
+extern EFI_GUID SmmCommunicationGuid;
+extern EFI_GUID AcpiTableGuid;
+extern EFI_GUID FastWmiGuid;
+
+
+// Keep SMM helper names available during the naming update
+#define memoryCopy MemoryCopy
+#define memoryClear MemoryClear
+#define guidEqual GuidEqual
+#define serialInit SerialInit
+#define logText LogText
+#define logHex LogHex
+#define logStatus LogStatus
+#define configCommGuid ConfigCommGuid
+#define wmiGuid WmiGuid
+#define configGuid ConfigGuid
+#define smmBase2Guid SmmBase2Guid
+#define smmSwDispatchGuid SmmSwDispatchGuid
+#define smmCommunicationGuid SmmCommunicationGuid
+#define acpiTableGuid AcpiTableGuid
+#define fastWmiGuid FastWmiGuid
 
 #endif

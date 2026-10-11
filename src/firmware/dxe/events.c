@@ -1,123 +1,143 @@
 #include "internal.h"
 
-static EFI_GUID readyToBootGuid = {
+static EFI_GUID ReadyToBootGuid = {
   0x7ce88fb3, 0x4bd7, 0x4679, { 0x87, 0xa8, 0xa8, 0xd8, 0xde, 0xe5, 0x0d, 0x2b } };
 
-static VOID EFIAPI retrySetup( EFI_EVENT event, VOID *context ) {
-  EFI_STATUS wmiStatus;
-  EFI_STATUS smmStatus;
-  ( void )event;
-  ( void )context;
+static VOID EFIAPI RetrySetup( EFI_EVENT Event, VOID *Context ) {
+  EFI_STATUS WmiStatus;
+  EFI_STATUS SmmStatus;
+  ( void )Event;
+  ( void )Context;
 
-  if ( dxe.wmiInstalled != 0 && dxe.configured != 0 ) {
+  if ( Dxe.WmiInstalled != 0 && Dxe.Configured != 0 ) {
     return;
   }
-  wmiStatus = EFI_SUCCESS;
-  smmStatus = EFI_SUCCESS;
-  if ( dxe.wmiInstalled == 0 ) {
-    wmiStatus = installWmi();
+
+  WmiStatus = EFI_SUCCESS;
+  SmmStatus = EFI_SUCCESS;
+
+  if ( Dxe.WmiInstalled == 0 ) {
+    WmiStatus = InstallWmi();
   }
-  if ( dxe.configured == 0 ) {
-    smmStatus = configureSmm();
+
+  if ( Dxe.Configured == 0 ) {
+    SmmStatus = ConfigureSmm();
   }
-  if ( !EFI_ERROR( wmiStatus ) && !EFI_ERROR( smmStatus ) && dxe.retryTimerEvent != 0 ) {
-    smmStatus = dxe.systemTable->BootServices->SetTimer( dxe.retryTimerEvent, TimerCancel, 0 );
-    if ( EFI_ERROR( smmStatus ) ) {
-      logStatus( "dxe retry timer cancel failed ", smmStatus );
+
+  if ( !EFI_ERROR( WmiStatus ) && !EFI_ERROR( SmmStatus ) && Dxe.RetryTimerEvent != 0 ) {
+    SmmStatus = Dxe.SystemTable->BootServices->SetTimer( Dxe.RetryTimerEvent, TimerCancel, 0 );
+
+    if ( EFI_ERROR( SmmStatus ) ) {
+      LogStatus( "dxe retry timer cancel failed ", SmmStatus );
     } else {
-      logText( "dxe retry timer canceled\n" );
+      LogText( "dxe retry timer canceled\n" );
     }
   }
 }
 
-VOID registerRetryTimer( VOID ) {
-  EFI_STATUS status;
+VOID RegisterRetryTimer( VOID ) {
+  EFI_STATUS Status;
 
-  if ( dxe.retryTimerEvent != 0 || ( dxe.wmiInstalled != 0 && dxe.configured != 0 ) ) {
+  if ( Dxe.RetryTimerEvent != 0 || ( Dxe.WmiInstalled != 0 && Dxe.Configured != 0 ) ) {
     return;
   }
-  status = dxe.systemTable->BootServices->CreateEvent(
-    EVT_TIMER | EVT_NOTIFY_SIGNAL, TPL_CALLBACK, retrySetup, 0, &dxe.retryTimerEvent );
-  if ( EFI_ERROR( status ) ) {
-    dxe.retryTimerEvent = 0;
-    logStatus( "dxe retry timer create failed ", status );
+
+  Status = Dxe.SystemTable->BootServices->CreateEvent(
+    EVT_TIMER | EVT_NOTIFY_SIGNAL, TPL_CALLBACK, RetrySetup, 0, &Dxe.RetryTimerEvent );
+
+  if ( EFI_ERROR( Status ) ) {
+    Dxe.RetryTimerEvent = 0;
+    LogStatus( "dxe retry timer create failed ", Status );
     return;
   }
-  status =
-    dxe.systemTable->BootServices->SetTimer( dxe.retryTimerEvent, TimerPeriodic, 5000000ULL );
-  if ( EFI_ERROR( status ) ) {
-    dxe.systemTable->BootServices->CloseEvent( dxe.retryTimerEvent );
-    dxe.retryTimerEvent = 0;
-    logStatus( "dxe retry timer start failed ", status );
+
+  Status =
+    Dxe.SystemTable->BootServices->SetTimer( Dxe.RetryTimerEvent, TimerPeriodic, 5000000ULL );
+
+  if ( EFI_ERROR( Status ) ) {
+    Dxe.SystemTable->BootServices->CloseEvent( Dxe.RetryTimerEvent );
+    Dxe.RetryTimerEvent = 0;
+    LogStatus( "dxe retry timer start failed ", Status );
   } else {
-    logText( "dxe retry timer registered\n" );
+    LogText( "dxe retry timer registered\n" );
   }
 }
 
-VOID registerSmmCommNotify( VOID ) {
-  EFI_STATUS status;
+VOID RegisterSmmCommNotify( VOID ) {
+  EFI_STATUS Status;
 
-  if ( dxe.smmCommEvent != 0 || dxe.configured != 0 ) {
+  if ( Dxe.SmmCommEvent != 0 || Dxe.Configured != 0 ) {
     return;
   }
-  status = dxe.systemTable->BootServices->CreateEvent(
-    EVT_NOTIFY_SIGNAL, TPL_CALLBACK, retrySetup, 0, &dxe.smmCommEvent );
-  if ( EFI_ERROR( status ) ) {
-    dxe.smmCommEvent = 0;
-    logStatus( "dxe smm communication notify create failed ", status );
+
+  Status = Dxe.SystemTable->BootServices->CreateEvent(
+    EVT_NOTIFY_SIGNAL, TPL_CALLBACK, RetrySetup, 0, &Dxe.SmmCommEvent );
+
+  if ( EFI_ERROR( Status ) ) {
+    Dxe.SmmCommEvent = 0;
+    LogStatus( "dxe smm communication notify create failed ", Status );
     return;
   }
-  status = dxe.systemTable->BootServices->RegisterProtocolNotify(
-    &smmCommunicationGuid, dxe.smmCommEvent, &dxe.smmCommRegistration );
-  if ( EFI_ERROR( status ) ) {
-    dxe.systemTable->BootServices->CloseEvent( dxe.smmCommEvent );
-    dxe.smmCommEvent = 0;
-    logStatus( "dxe smm communication notify failed ", status );
+
+  Status = Dxe.SystemTable->BootServices->RegisterProtocolNotify(
+    &SmmCommunicationGuid, Dxe.SmmCommEvent, &Dxe.SmmCommRegistration );
+
+  if ( EFI_ERROR( Status ) ) {
+    Dxe.SystemTable->BootServices->CloseEvent( Dxe.SmmCommEvent );
+    Dxe.SmmCommEvent = 0;
+    LogStatus( "dxe smm communication notify failed ", Status );
   } else {
-    logText( "dxe smm communication notify registered\n" );
+    LogText( "dxe smm communication notify registered\n" );
   }
 }
 
-VOID registerAcpiNotify( VOID ) {
-  EFI_STATUS status;
+VOID RegisterAcpiNotify( VOID ) {
+  EFI_STATUS Status;
 
-  if ( dxe.acpiEvent != 0 || dxe.wmiInstalled != 0 ) {
+  if ( Dxe.AcpiEvent != 0 || Dxe.WmiInstalled != 0 ) {
     return;
   }
-  status = dxe.systemTable->BootServices->CreateEvent(
-    EVT_NOTIFY_SIGNAL, TPL_CALLBACK, retrySetup, 0, &dxe.acpiEvent );
-  if ( EFI_ERROR( status ) ) {
-    dxe.acpiEvent = 0;
-    logStatus( "dxe acpi notify create failed ", status );
+
+  Status = Dxe.SystemTable->BootServices->CreateEvent(
+    EVT_NOTIFY_SIGNAL, TPL_CALLBACK, RetrySetup, 0, &Dxe.AcpiEvent );
+
+  if ( EFI_ERROR( Status ) ) {
+    Dxe.AcpiEvent = 0;
+    LogStatus( "dxe acpi notify create failed ", Status );
     return;
   }
-  status = dxe.systemTable->BootServices->RegisterProtocolNotify(
-    &acpiTableGuid, dxe.acpiEvent, &dxe.acpiRegistration );
-  if ( EFI_ERROR( status ) ) {
-    dxe.systemTable->BootServices->CloseEvent( dxe.acpiEvent );
-    dxe.acpiEvent = 0;
-    logStatus( "dxe acpi notify failed ", status );
+
+  Status = Dxe.SystemTable->BootServices->RegisterProtocolNotify(
+    &AcpiTableGuid, Dxe.AcpiEvent, &Dxe.AcpiRegistration );
+
+  if ( EFI_ERROR( Status ) ) {
+    Dxe.SystemTable->BootServices->CloseEvent( Dxe.AcpiEvent );
+    Dxe.AcpiEvent = 0;
+    LogStatus( "dxe acpi notify failed ", Status );
   } else {
-    logText( "dxe acpi notify registered\n" );
+    LogText( "dxe acpi notify registered\n" );
   }
 }
 
-VOID registerReadyToBootRetry( VOID ) {
-  EFI_STATUS status;
+VOID RegisterReadyToBootRetry( VOID ) {
+  EFI_STATUS Status;
 
-  if ( dxe.readyToBootEvent != 0 || ( dxe.wmiInstalled != 0 && dxe.configured != 0 ) ||
-       dxe.systemTable->BootServices->CreateEventEx == 0 ) {
-    if ( dxe.systemTable->BootServices->CreateEventEx == 0 ) {
-      logText( "dxe ready retry unavailable\n" );
+  if ( Dxe.ReadyToBootEvent != 0 || ( Dxe.WmiInstalled != 0 && Dxe.Configured != 0 ) ||
+       Dxe.SystemTable->BootServices->CreateEventEx == 0 ) {
+    if ( Dxe.SystemTable->BootServices->CreateEventEx == 0 ) {
+      LogText( "dxe ready retry unavailable\n" );
     }
+
     return;
   }
-  status = dxe.systemTable->BootServices->CreateEventEx(
-    EVT_NOTIFY_SIGNAL, TPL_CALLBACK, retrySetup, 0, &readyToBootGuid, &dxe.readyToBootEvent );
-  if ( EFI_ERROR( status ) ) {
-    dxe.readyToBootEvent = 0;
-    logStatus( "dxe ready retry failed ", status );
+
+  Status = Dxe.SystemTable->BootServices->CreateEventEx(
+    EVT_NOTIFY_SIGNAL, TPL_CALLBACK, RetrySetup, 0, &ReadyToBootGuid, &Dxe.ReadyToBootEvent );
+
+  if ( EFI_ERROR( Status ) ) {
+    Dxe.ReadyToBootEvent = 0;
+    LogStatus( "dxe ready retry failed ", Status );
   } else {
-    logText( "dxe ready retry registered\n" );
+    LogText( "dxe ready retry registered\n" );
   }
 }

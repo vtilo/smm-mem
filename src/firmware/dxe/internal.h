@@ -36,33 +36,33 @@ typedef struct {
 #define EFI_ACPI_MEMORY_NVS 10U
 
 typedef struct {
-  EFI_SYSTEM_TABLE *systemTable;
-  EFI_PHYSICAL_ADDRESS mailboxPhysical;
-  EFI_EVENT retryTimerEvent;
-  EFI_EVENT readyToBootEvent;
-  EFI_EVENT smmCommEvent;
-  EFI_EVENT acpiEvent;
-  VOID *smmCommRegistration;
-  VOID *acpiRegistration;
-  UINT32 configured;
-  UINT32 configureAttempts;
-  UINT32 wmiInstalled;
-  UINT32 fastWmiInstalled;
-  UINT32 wmiAttempts;
-  CONFIG publishedConfig;
-  UINT8 ssdt[512];
-  UINT8 fastSsdt[512];
+  EFI_SYSTEM_TABLE *SystemTable;
+  EFI_PHYSICAL_ADDRESS MailboxPhysical;
+  EFI_EVENT RetryTimerEvent;
+  EFI_EVENT ReadyToBootEvent;
+  EFI_EVENT SmmCommEvent;
+  EFI_EVENT AcpiEvent;
+  VOID *SmmCommRegistration;
+  VOID *AcpiRegistration;
+  UINT32 Configured;
+  UINT32 ConfigureAttempts;
+  UINT32 WmiInstalled;
+  UINT32 FastWmiInstalled;
+  UINT32 WmiAttempts;
+  CONFIG PublishedConfig;
+  UINT8 Ssdt[512];
+  UINT8 FastSsdt[512];
 } DxeState;
 
-extern DxeState dxe;
-UINTN buildSsdt( UINT8 *buffer, UINTN capacity, BOOLEAN fast );
-EFI_STATUS allocateMailbox( VOID );
-EFI_STATUS installWmi( VOID );
-EFI_STATUS publishConfig( VOID );
-EFI_STATUS configureSmm( VOID );
-VOID registerRetryTimer( VOID );
-VOID registerSmmCommNotify( VOID );
-VOID registerAcpiNotify( VOID );
-VOID registerReadyToBootRetry( VOID );
+extern DxeState Dxe;
+UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast );
+EFI_STATUS AllocateMailbox( VOID );
+EFI_STATUS InstallWmi( VOID );
+EFI_STATUS PublishConfig( VOID );
+EFI_STATUS ConfigureSmm( VOID );
+VOID RegisterRetryTimer( VOID );
+VOID RegisterSmmCommNotify( VOID );
+VOID RegisterAcpiNotify( VOID );
+VOID RegisterReadyToBootRetry( VOID );
 
 #endif

@@ -1,229 +1,242 @@
 #include "internal.h"
 
-static UINT32 signature32( char a, char b, char c, char d ) {
-  return ( UINT32 )( UINT8 )a | ( ( UINT32 )( UINT8 )b << 8 ) | ( ( UINT32 )( UINT8 )c << 16 ) |
-         ( ( UINT32 )( UINT8 )d << 24 );
+static UINT32 Signature32( char A, char B, char C, char D ) {
+  return ( UINT32 )( UINT8 )A | ( ( UINT32 )( UINT8 )B << 8 ) | ( ( UINT32 )( UINT8 )C << 16 ) |
+         ( ( UINT32 )( UINT8 )D << 24 );
 }
 
-static UINT8 acpiChecksum( const UINT8 *buffer, UINTN size ) {
-  UINT8 sum = 0;
-  while ( size-- ) {
-    sum = ( UINT8 )( sum + *buffer++ );
+static UINT8 AcpiChecksum( const UINT8 *Buffer, UINTN Size ) {
+  UINT8 Sum = 0;
+
+  while ( Size-- ) {
+    Sum = ( UINT8 )( Sum + *Buffer++ );
   }
-  return ( UINT8 )( 0 - sum );
+
+  return ( UINT8 )( 0 - Sum );
 }
 
-static UINT8 *emitName( UINT8 *out, const char name[4] ) {
-  memoryCopy( out, name, 4 );
-  return out + 4;
+static UINT8 *EmitName( UINT8 *Out, const char Name[4] ) {
+  MemoryCopy( Out, Name, 4 );
+
+  return Out + 4;
 }
 
-static UINT8 *emitBytes( UINT8 *out, const VOID *data, UINTN size ) {
-  memoryCopy( out, data, size );
-  return out + size;
+static UINT8 *EmitBytes( UINT8 *Out, const VOID *Data, UINTN Size ) {
+  MemoryCopy( Out, Data, Size );
+
+  return Out + Size;
 }
 
-static UINT8 *emitDwordConst( UINT8 *out, UINT32 value ) {
-  *out++ = 0x0C;
-  *out++ = ( UINT8 )value;
-  *out++ = ( UINT8 )( value >> 8 );
-  *out++ = ( UINT8 )( value >> 16 );
-  *out++ = ( UINT8 )( value >> 24 );
-  return out;
+static UINT8 *EmitDwordConst( UINT8 *Out, UINT32 Value ) {
+  *Out++ = 0x0C;
+  *Out++ = ( UINT8 )Value;
+  *Out++ = ( UINT8 )( Value >> 8 );
+  *Out++ = ( UINT8 )( Value >> 16 );
+  *Out++ = ( UINT8 )( Value >> 24 );
+
+  return Out;
 }
 
-static UINT8 *emitString( UINT8 *out, const char *text ) {
-  *out++ = 0x0D;
-  while ( *text ) {
-    *out++ = ( UINT8 )*text++;
+static UINT8 *EmitString( UINT8 *Out, const char *Text ) {
+  *Out++ = 0x0D;
+
+  while ( *Text ) {
+    *Out++ = ( UINT8 )*Text++;
   }
-  *out++ = 0;
-  return out;
+
+  *Out++ = 0;
+
+  return Out;
 }
 
-static UINT8 *reservePkgLen( UINT8 *out ) {
-  *out++ = 0;
-  *out++ = 0;
-  return out;
+static UINT8 *ReservePkgLen( UINT8 *Out ) {
+  *Out++ = 0;
+  *Out++ = 0;
+
+  return Out;
 }
 
-static UINT8 *emitPkgLength( UINT8 *out, UINTN length ) {
-  if ( length < 0x40U ) {
-    *out++ = ( UINT8 )length;
-  } else if ( length < 0x1000U ) {
-    *out++ = ( UINT8 )( 0x40U | ( length & 0x0FU ) );
-    *out++ = ( UINT8 )( ( length >> 4 ) & 0xFFU );
-  } else if ( length < 0x100000U ) {
-    *out++ = ( UINT8 )( 0x80U | ( length & 0x0FU ) );
-    *out++ = ( UINT8 )( ( length >> 4 ) & 0xFFU );
-    *out++ = ( UINT8 )( ( length >> 12 ) & 0xFFU );
+static UINT8 *EmitPkgLength( UINT8 *Out, UINTN Length ) {
+  if ( Length < 0x40U ) {
+    *Out++ = ( UINT8 )Length;
+  } else if ( Length < 0x1000U ) {
+    *Out++ = ( UINT8 )( 0x40U | ( Length & 0x0FU ) );
+    *Out++ = ( UINT8 )( ( Length >> 4 ) & 0xFFU );
+  } else if ( Length < 0x100000U ) {
+    *Out++ = ( UINT8 )( 0x80U | ( Length & 0x0FU ) );
+    *Out++ = ( UINT8 )( ( Length >> 4 ) & 0xFFU );
+    *Out++ = ( UINT8 )( ( Length >> 12 ) & 0xFFU );
   } else {
-    *out++ = ( UINT8 )( 0xC0U | ( length & 0x0FU ) );
-    *out++ = ( UINT8 )( ( length >> 4 ) & 0xFFU );
-    *out++ = ( UINT8 )( ( length >> 12 ) & 0xFFU );
-    *out++ = ( UINT8 )( ( length >> 20 ) & 0xFFU );
+    *Out++ = ( UINT8 )( 0xC0U | ( Length & 0x0FU ) );
+    *Out++ = ( UINT8 )( ( Length >> 4 ) & 0xFFU );
+    *Out++ = ( UINT8 )( ( Length >> 12 ) & 0xFFU );
+    *Out++ = ( UINT8 )( ( Length >> 20 ) & 0xFFU );
   }
-  return out;
+
+  return Out;
 }
 
-static VOID patchPkgLen( UINT8 *pkg, UINTN length ) {
-  pkg[0] = ( UINT8 )( 0x40U | ( length & 0x0FU ) );
-  pkg[1] = ( UINT8 )( ( length >> 4 ) & 0xFFU );
+static VOID PatchPkgLen( UINT8 *Pkg, UINTN Length ) {
+  Pkg[0] = ( UINT8 )( 0x40U | ( Length & 0x0FU ) );
+  Pkg[1] = ( UINT8 )( ( Length >> 4 ) & 0xFFU );
 }
 
-static UINT8 *emitMutex( UINT8 *out ) {
-  *out++ = 0x5C;
-  *out++ = 0x2F;
-  *out++ = 3;
-  out = emitName( out, "_SB_" );
-  out = emitName( out, "SMMM" );
-  return emitName( out, "SMML" );
+static UINT8 *EmitMutex( UINT8 *Out ) {
+  *Out++ = 0x5C;
+  *Out++ = 0x2F;
+  *Out++ = 3;
+  Out = EmitName( Out, "_SB_" );
+  Out = EmitName( Out, "SMMM" );
+
+  return EmitName( Out, "SMML" );
 }
 
-UINTN buildSsdt( UINT8 *buffer, UINTN capacity, BOOLEAN fast ) {
-  AcpiHeader *header = ( AcpiHeader * )buffer;
-  UINT8 *out = buffer + sizeof( AcpiHeader );
-  UINT8 *scopePkg;
-  UINT8 *devicePkg;
-  UINT8 *reqFieldPkg;
-  UINT8 *outFieldPkg;
-  UINT8 *methodPkg;
-  UINT8 wdg[20];
+UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast ) {
+  AcpiHeader *Header = ( AcpiHeader * )Buffer;
+  UINT8 *Out = Buffer + sizeof( AcpiHeader );
+  UINT8 *ScopePkg;
+  UINT8 *DevicePkg;
+  UINT8 *ReqFieldPkg;
+  UINT8 *OutFieldPkg;
+  UINT8 *MethodPkg;
+  UINT8 Wdg[20];
 
-  if ( capacity < sizeof( dxe.ssdt ) ) {
+  if ( Capacity < sizeof( Dxe.Ssdt ) ) {
     return 0;
   }
-  memoryClear( buffer, capacity );
-  header->Signature = signature32( 'S', 'S', 'D', 'T' );
-  header->Revision = 2;
-  memoryCopy( header->OemId, "MEMDEV", 6 );
-  memoryCopy( header->OemTableId, fast ? "MEMFAST " : "MEMDEV  ", 8 );
-  header->OemRevision = 1;
-  header->CreatorId = signature32( 'S', 'M', 'M', 'M' );
-  header->CreatorRevision = 1;
 
-  *out++ = 0x10;
-  scopePkg = out;
-  out = reservePkgLen( out );
-  *out++ = 0x5C;
-  out = emitName( out, "_SB_" );
+  MemoryClear( Buffer, Capacity );
+  Header->Signature = Signature32( 'S', 'S', 'D', 'T' );
+  Header->Revision = 2;
+  MemoryCopy( Header->OemId, "MEMDEV", 6 );
+  MemoryCopy( Header->OemTableId, Fast ? "MEMFAST " : "MEMDEV  ", 8 );
+  Header->OemRevision = 1;
+  Header->CreatorId = Signature32( 'S', 'M', 'M', 'M' );
+  Header->CreatorRevision = 1;
 
-  *out++ = 0x5B;
-  *out++ = 0x82;
-  devicePkg = out;
-  out = reservePkgLen( out );
-  out = emitName( out, fast ? "SMMF" : "SMMM" );
+  *Out++ = 0x10;
+  ScopePkg = Out;
+  Out = ReservePkgLen( Out );
+  *Out++ = 0x5C;
+  Out = EmitName( Out, "_SB_" );
 
-  if ( !fast ) {
-    *out++ = 0x5B;
-    *out++ = 0x01;
-    out = emitName( out, "SMML" );
-    *out++ = 0;
+  *Out++ = 0x5B;
+  *Out++ = 0x82;
+  DevicePkg = Out;
+  Out = ReservePkgLen( Out );
+  Out = EmitName( Out, Fast ? "SMMF" : "SMMM" );
+
+  if ( !Fast ) {
+    *Out++ = 0x5B;
+    *Out++ = 0x01;
+    Out = EmitName( Out, "SMML" );
+    *Out++ = 0;
   }
 
-  *out++ = 0x08;
-  out = emitName( out, "_HID" );
-  out = emitString( out, "PNP0C14" );
-  *out++ = 0x08;
-  out = emitName( out, "_UID" );
-  out = emitString( out, fast ? "MemFast" : "Mem" );
+  *Out++ = 0x08;
+  Out = EmitName( Out, "_HID" );
+  Out = EmitString( Out, "PNP0C14" );
+  *Out++ = 0x08;
+  Out = EmitName( Out, "_UID" );
+  Out = EmitString( Out, Fast ? "MemFast" : "Mem" );
 
-  memoryClear( wdg, sizeof( wdg ) );
-  memoryCopy( wdg, fast ? &fastWmiGuid : &wmiGuid, sizeof( wmiGuid ) );
-  wdg[16] = 'B';
-  wdg[17] = 'D';
-  wdg[18] = 1;
-  wdg[19] = 0x02;
-  *out++ = 0x08;
-  out = emitName( out, "_WDG" );
-  *out++ = 0x11;
-  *out++ = 0x17;
-  *out++ = 0x0A;
-  *out++ = ( UINT8 )sizeof( wdg );
-  out = emitBytes( out, wdg, sizeof( wdg ) );
+  MemoryClear( Wdg, sizeof( Wdg ) );
+  MemoryCopy( Wdg, Fast ? &FastWmiGuid : &WmiGuid, sizeof( WmiGuid ) );
+  Wdg[16] = 'B';
+  Wdg[17] = 'D';
+  Wdg[18] = 1;
+  Wdg[19] = 0x02;
+  *Out++ = 0x08;
+  Out = EmitName( Out, "_WDG" );
+  *Out++ = 0x11;
+  *Out++ = 0x17;
+  *Out++ = 0x0A;
+  *Out++ = ( UINT8 )sizeof( Wdg );
+  Out = EmitBytes( Out, Wdg, sizeof( Wdg ) );
 
-  *out++ = 0x5B;
-  *out++ = 0x80;
-  out = emitName( out, "SMIR" );
-  *out++ = 0x01;
-  out = emitDwordConst( out, 0xB2U );
-  *out++ = 0x0A;
-  *out++ = 0x01;
+  *Out++ = 0x5B;
+  *Out++ = 0x80;
+  Out = EmitName( Out, "SMIR" );
+  *Out++ = 0x01;
+  Out = EmitDwordConst( Out, 0xB2U );
+  *Out++ = 0x0A;
+  *Out++ = 0x01;
 
-  *out++ = 0x5B;
-  *out++ = 0x81;
-  *out++ = 0x0B;
-  out = emitName( out, "SMIR" );
-  *out++ = 0x01;
-  out = emitName( out, "SMIC" );
-  *out++ = 0x08;
+  *Out++ = 0x5B;
+  *Out++ = 0x81;
+  *Out++ = 0x0B;
+  Out = EmitName( Out, "SMIR" );
+  *Out++ = 0x01;
+  Out = EmitName( Out, "SMIC" );
+  *Out++ = 0x08;
 
-  *out++ = 0x5B;
-  *out++ = 0x80;
-  out = emitName( out, "MREQ" );
-  *out++ = 0x00;
-  out = emitDwordConst( out, ( UINT32 )dxe.mailboxPhysical );
-  out = emitDwordConst( out, ( fast ? FAST_REQUEST_SIZE : REQUEST_SIZE ) );
+  *Out++ = 0x5B;
+  *Out++ = 0x80;
+  Out = EmitName( Out, "MREQ" );
+  *Out++ = 0x00;
+  Out = EmitDwordConst( Out, ( UINT32 )Dxe.MailboxPhysical );
+  Out = EmitDwordConst( Out, ( Fast ? FAST_REQUEST_SIZE : REQUEST_SIZE ) );
 
-  *out++ = 0x5B;
-  *out++ = 0x81;
-  reqFieldPkg = out;
-  out = reservePkgLen( out );
-  out = emitName( out, "MREQ" );
-  *out++ = 0x01;
-  out = emitName( out, "WMRQ" );
-  out = emitPkgLength( out, ( fast ? FAST_REQUEST_SIZE : REQUEST_SIZE ) * 8U );
-  patchPkgLen( reqFieldPkg, ( UINTN )( out - reqFieldPkg ) );
+  *Out++ = 0x5B;
+  *Out++ = 0x81;
+  ReqFieldPkg = Out;
+  Out = ReservePkgLen( Out );
+  Out = EmitName( Out, "MREQ" );
+  *Out++ = 0x01;
+  Out = EmitName( Out, "WMRQ" );
+  Out = EmitPkgLength( Out, ( Fast ? FAST_REQUEST_SIZE : REQUEST_SIZE ) * 8U );
+  PatchPkgLen( ReqFieldPkg, ( UINTN )( Out - ReqFieldPkg ) );
 
-  *out++ = 0x5B;
-  *out++ = 0x80;
-  out = emitName( out, "MOUT" );
-  *out++ = 0x00;
-  out = emitDwordConst( out, ( UINT32 )( dxe.mailboxPhysical + RESPONSE_OFFSET ) );
-  out = emitDwordConst( out, ( fast ? FAST_RESPONSE_SIZE : RESPONSE_SIZE ) );
+  *Out++ = 0x5B;
+  *Out++ = 0x80;
+  Out = EmitName( Out, "MOUT" );
+  *Out++ = 0x00;
+  Out = EmitDwordConst( Out, ( UINT32 )( Dxe.MailboxPhysical + RESPONSE_OFFSET ) );
+  Out = EmitDwordConst( Out, ( Fast ? FAST_RESPONSE_SIZE : RESPONSE_SIZE ) );
 
-  *out++ = 0x5B;
-  *out++ = 0x81;
-  outFieldPkg = out;
-  out = reservePkgLen( out );
-  out = emitName( out, "MOUT" );
-  *out++ = 0x01;
-  out = emitName( out, "WOUT" );
-  out = emitPkgLength( out, ( fast ? FAST_RESPONSE_SIZE : RESPONSE_SIZE ) * 8U );
-  patchPkgLen( outFieldPkg, ( UINTN )( out - outFieldPkg ) );
+  *Out++ = 0x5B;
+  *Out++ = 0x81;
+  OutFieldPkg = Out;
+  Out = ReservePkgLen( Out );
+  Out = EmitName( Out, "MOUT" );
+  *Out++ = 0x01;
+  Out = EmitName( Out, "WOUT" );
+  Out = EmitPkgLength( Out, ( Fast ? FAST_RESPONSE_SIZE : RESPONSE_SIZE ) * 8U );
+  PatchPkgLen( OutFieldPkg, ( UINTN )( Out - OutFieldPkg ) );
 
-  *out++ = 0x14;
-  methodPkg = out;
-  out = reservePkgLen( out );
-  out = emitName( out, "WMBD" );
-  *out++ = 0x03;
-  *out++ = 0x5B;
-  *out++ = 0x23;
-  out = emitMutex( out );
-  *out++ = 0xFF;
-  *out++ = 0xFF;
+  *Out++ = 0x14;
+  MethodPkg = Out;
+  Out = ReservePkgLen( Out );
+  Out = EmitName( Out, "WMBD" );
+  *Out++ = 0x03;
+  *Out++ = 0x5B;
+  *Out++ = 0x23;
+  Out = EmitMutex( Out );
+  *Out++ = 0xFF;
+  *Out++ = 0xFF;
 
-  *out++ = 0x70;
-  *out++ = 0x6A;
-  out = emitName( out, "WMRQ" );
-  *out++ = 0x70;
-  *out++ = 0x0A;
-  *out++ = ( UINT8 )SW_SMI_VALUE;
-  out = emitName( out, "SMIC" );
+  *Out++ = 0x70;
+  *Out++ = 0x6A;
+  Out = EmitName( Out, "WMRQ" );
+  *Out++ = 0x70;
+  *Out++ = 0x0A;
+  *Out++ = ( UINT8 )SW_SMI_VALUE;
+  Out = EmitName( Out, "SMIC" );
 
-  *out++ = 0x70;
-  out = emitName( out, "WOUT" );
-  *out++ = 0x60;
-  *out++ = 0x5B;
-  *out++ = 0x27;
-  out = emitMutex( out );
-  *out++ = 0xA4;
-  *out++ = 0x60;
+  *Out++ = 0x70;
+  Out = EmitName( Out, "WOUT" );
+  *Out++ = 0x60;
+  *Out++ = 0x5B;
+  *Out++ = 0x27;
+  Out = EmitMutex( Out );
+  *Out++ = 0xA4;
+  *Out++ = 0x60;
 
-  patchPkgLen( methodPkg, ( UINTN )( out - methodPkg ) );
-  patchPkgLen( devicePkg, ( UINTN )( out - devicePkg ) );
-  patchPkgLen( scopePkg, ( UINTN )( out - scopePkg ) );
-  header->Length = ( UINT32 )( out - buffer );
-  header->Checksum = acpiChecksum( buffer, header->Length );
-  return header->Length;
+  PatchPkgLen( MethodPkg, ( UINTN )( Out - MethodPkg ) );
+  PatchPkgLen( DevicePkg, ( UINTN )( Out - DevicePkg ) );
+  PatchPkgLen( ScopePkg, ( UINTN )( Out - ScopePkg ) );
+  Header->Length = ( UINT32 )( Out - Buffer );
+  Header->Checksum = AcpiChecksum( Buffer, Header->Length );
+
+  return Header->Length;
 }

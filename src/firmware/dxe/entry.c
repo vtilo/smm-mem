@@ -1,43 +1,53 @@
 #include "internal.h"
 
-DxeState dxe;
+DxeState Dxe;
 
-EFI_STATUS EFIAPI DxeEntry( EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE *systemTable ) {
-  EFI_STATUS status;
-  ( void )imageHandle;
+EFI_STATUS EFIAPI DxeEntry( EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable ) {
+  EFI_STATUS Status;
+  ( void )ImageHandle;
 
-  dxe.systemTable = systemTable;
-  serialInit();
-  logText( "mem dxe init\n" );
-  status = allocateMailbox();
-  if ( EFI_ERROR( status ) ) {
-    logStatus( "dxe mailbox failed ", status );
+  Dxe.SystemTable = SystemTable;
+  SerialInit();
+  LogText( "mem dxe init\n" );
+  Status = AllocateMailbox();
+
+  if ( EFI_ERROR( Status ) ) {
+    LogStatus( "dxe mailbox failed ", Status );
+
     return EFI_SUCCESS;
   }
-  logText( "dxe mailbox base=0x" );
-  logHex( dxe.mailboxPhysical );
-  logText( " size=0x" );
-  logHex( MAILBOX_SIZE );
-  logText( " sw=0x" );
-  logHex( SW_SMI_VALUE );
-  logText( "\n" );
-  status = publishConfig();
-  if ( EFI_ERROR( status ) ) {
-    logStatus( "dxe config publish failed ", status );
+
+  LogText( "dxe mailbox base=0x" );
+  LogHex( Dxe.MailboxPhysical );
+  LogText( " size=0x" );
+  LogHex( MAILBOX_SIZE );
+  LogText( " sw=0x" );
+  LogHex( SW_SMI_VALUE );
+  LogText( "\n" );
+  Status = PublishConfig();
+
+  if ( EFI_ERROR( Status ) ) {
+    LogStatus( "dxe config publish failed ", Status );
   } else {
-    logText( "dxe config published\n" );
+    LogText( "dxe config published\n" );
   }
-  status = installWmi();
-  if ( EFI_ERROR( status ) ) {
-    logStatus( "dxe wmi install failed ", status );
+
+  Status = InstallWmi();
+
+  if ( EFI_ERROR( Status ) ) {
+    LogStatus( "dxe wmi install failed ", Status );
   }
-  status = configureSmm();
-  if ( dxe.wmiInstalled == 0 || dxe.configured == 0 ) {
-    registerRetryTimer();
-    registerReadyToBootRetry();
-    registerSmmCommNotify();
-    registerAcpiNotify();
+
+  Status = ConfigureSmm();
+
+  if ( Dxe.WmiInstalled == 0 || Dxe.Configured == 0 ) {
+    RegisterRetryTimer();
+    RegisterReadyToBootRetry();
+    RegisterSmmCommNotify();
+    RegisterAcpiNotify();
   }
-  logText( "mem dxe done\n" );
+
+  LogText( "mem dxe done\n" );
+
   return EFI_SUCCESS;
 }

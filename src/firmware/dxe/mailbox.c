@@ -1,201 +1,241 @@
 #include "internal.h"
 
-static EFI_GUID communicationRegionGuid = {
+static EFI_GUID CommunicationRegionGuid = {
   0x4e28ca50, 0xd582, 0x44ac, { 0xa1, 0x1f, 0xe3, 0xd5, 0x65, 0x26, 0xdb, 0x34 } };
 
-EFI_STATUS allocateMailbox( VOID ) {
-  EFI_STATUS status;
-  UINTN pages = ( MAILBOX_SIZE + 0xFFFU ) / 0x1000U;
+EFI_STATUS AllocateMailbox( VOID ) {
+  EFI_STATUS Status;
+  UINTN Pages = ( MAILBOX_SIZE + 0xFFFU ) / 0x1000U;
 
-  if ( dxe.mailboxPhysical != 0 ) {
+  if ( Dxe.MailboxPhysical != 0 ) {
     return EFI_SUCCESS;
   }
-  // The legacy AML mailbox address is encoded as a DWord.
-  dxe.mailboxPhysical = 0xFFFFFFFFULL;
-  status = dxe.systemTable->BootServices->AllocatePages(
-    AllocateMaxAddress, EFI_RUNTIME_SERVICES_DATA, pages, &dxe.mailboxPhysical );
-  if ( EFI_ERROR( status ) ) {
-    dxe.mailboxPhysical = 0;
-    return status;
+
+  // The legacy AML mailbox address is encoded as a DWord
+  Dxe.MailboxPhysical = 0xFFFFFFFFULL;
+  Status = Dxe.SystemTable->BootServices->AllocatePages(
+    AllocateMaxAddress, EFI_RUNTIME_SERVICES_DATA, Pages, &Dxe.MailboxPhysical );
+
+  if ( EFI_ERROR( Status ) ) {
+    Dxe.MailboxPhysical = 0;
+
+    return Status;
   }
-  memoryClear( ( VOID * )( UINTN )dxe.mailboxPhysical, MAILBOX_SIZE );
+
+  MemoryClear( ( VOID * )( UINTN )Dxe.MailboxPhysical, MAILBOX_SIZE );
+
   return EFI_SUCCESS;
 }
 
-EFI_STATUS publishConfig( VOID ) {
-  EFI_STATUS status;
+EFI_STATUS PublishConfig( VOID ) {
+  EFI_STATUS Status;
 
-  if ( dxe.systemTable->BootServices->InstallConfigurationTable == 0 ) {
+  if ( Dxe.SystemTable->BootServices->InstallConfigurationTable == 0 ) {
     return EFI_UNSUPPORTED;
   }
-  memoryClear( &dxe.publishedConfig, sizeof( dxe.publishedConfig ) );
-  dxe.publishedConfig.Magic = CONFIG_MAGIC;
-  dxe.publishedConfig.MailboxPhysical = dxe.mailboxPhysical;
-  dxe.publishedConfig.MailboxSize = MAILBOX_SIZE;
-  dxe.publishedConfig.SwSmiValue = SW_SMI_VALUE;
-  status =
-    dxe.systemTable->BootServices->InstallConfigurationTable( &configGuid, &dxe.publishedConfig );
-  return status;
+
+  MemoryClear( &Dxe.PublishedConfig, sizeof( Dxe.PublishedConfig ) );
+  Dxe.PublishedConfig.Magic = CONFIG_MAGIC;
+  Dxe.PublishedConfig.MailboxPhysical = Dxe.MailboxPhysical;
+  Dxe.PublishedConfig.MailboxSize = MAILBOX_SIZE;
+  Dxe.PublishedConfig.SwSmiValue = SW_SMI_VALUE;
+  Status =
+    Dxe.SystemTable->BootServices->InstallConfigurationTable( &ConfigGuid, &Dxe.PublishedConfig );
+
+  return Status;
 }
 
-static VOID *findSmmCommRegion( UINTN requiredSize, UINT32 *originalType, BOOLEAN logIt ) {
-  CommunicationRegionTable *table = 0;
-  UINT8 *entry;
-  UINTN index;
+static VOID *FindSmmCommRegion( UINTN RequiredSize, UINT32 *OriginalType, BOOLEAN LogIt ) {
+  CommunicationRegionTable *Table = 0;
+  UINT8 *Entry;
+  UINTN Index;
 
-  *originalType = 0xFFFFFFFFU;
-  if ( dxe.systemTable == 0 || dxe.systemTable->ConfigurationTable == 0 ) {
-    if ( logIt ) {
-      logText( "dxe config table unavailable\n" );
+  *OriginalType = 0xFFFFFFFFU;
+
+  if ( Dxe.SystemTable == 0 || Dxe.SystemTable->ConfigurationTable == 0 ) {
+    if ( LogIt ) {
+      LogText( "dxe config table unavailable\n" );
     }
+
     return 0;
   }
-  for ( index = 0; index < dxe.systemTable->NumberOfTableEntries; index++ ) {
-    EFI_CONFIGURATION_TABLE *config = &dxe.systemTable->ConfigurationTable[index];
-    if ( guidEqual( &config->VendorGuid, &communicationRegionGuid ) ) {
-      table = ( CommunicationRegionTable * )config->VendorTable;
+
+  for ( Index = 0; Index < Dxe.SystemTable->NumberOfTableEntries; Index++ ) {
+    EFI_CONFIGURATION_TABLE *Config = &Dxe.SystemTable->ConfigurationTable[Index];
+
+    if ( GuidEqual( &Config->VendorGuid, &CommunicationRegionGuid ) ) {
+      Table = ( CommunicationRegionTable * )Config->VendorTable;
       break;
     }
   }
-  if ( table == 0 || table->Version != 1 || table->NumberOfEntries == 0 ||
-       table->DescriptorSize < sizeof( MemoryDescriptor ) ) {
-    if ( logIt ) {
-      if ( table == 0 ) {
-        logText( "dxe smm comm region table missing\n" );
+
+  if ( Table == 0 || Table->Version != 1 || Table->NumberOfEntries == 0 ||
+       Table->DescriptorSize < sizeof( MemoryDescriptor ) ) {
+    if ( LogIt ) {
+      if ( Table == 0 ) {
+        LogText( "dxe smm comm region table missing\n" );
       } else {
-        logText( "dxe smm comm region table rejected version=0x" );
-        logHex( table->Version );
-        logText( " entries=0x" );
-        logHex( table->NumberOfEntries );
-        logText( " desc=0x" );
-        logHex( table->DescriptorSize );
-        logText( "\n" );
+        LogText( "dxe smm comm region table rejected version=0x" );
+        LogHex( Table->Version );
+        LogText( " entries=0x" );
+        LogHex( Table->NumberOfEntries );
+        LogText( " desc=0x" );
+        LogHex( Table->DescriptorSize );
+        LogText( "\n" );
       }
     }
+
     return 0;
   }
-  entry = ( UINT8 * )( table + 1 );
-  for ( index = 0; index < table->NumberOfEntries; index++ ) {
-    MemoryDescriptor *desc = ( MemoryDescriptor * )( entry + ( index * table->DescriptorSize ) );
-    UINT64 bytes = desc->NumberOfPages << 12;
-    if ( bytes < requiredSize ) {
+
+  Entry = ( UINT8 * )( Table + 1 );
+
+  for ( Index = 0; Index < Table->NumberOfEntries; Index++ ) {
+    MemoryDescriptor *Desc = ( MemoryDescriptor * )( Entry + ( Index * Table->DescriptorSize ) );
+    UINT64 Bytes = Desc->NumberOfPages << 12;
+
+    if ( Bytes < RequiredSize ) {
       continue;
     }
-    if ( desc->Type == EFI_RESERVED_MEMORY_TYPE || desc->Type == EFI_RUNTIME_SERVICES_DATA ||
-         desc->Type == EFI_ACPI_MEMORY_NVS || desc->Type == EFI_CONVENTIONAL_MEMORY ) {
-      *originalType = desc->Type;
-      if ( logIt ) {
-        logText( "dxe smm comm region base=0x" );
-        logHex( desc->PhysicalStart );
-        logText( " size=0x" );
-        logHex( bytes );
-        logText( " type=0x" );
-        logHex( *originalType );
-        logText( "\n" );
+
+    if ( Desc->Type == EFI_RESERVED_MEMORY_TYPE || Desc->Type == EFI_RUNTIME_SERVICES_DATA ||
+         Desc->Type == EFI_ACPI_MEMORY_NVS || Desc->Type == EFI_CONVENTIONAL_MEMORY ) {
+      *OriginalType = Desc->Type;
+
+      if ( LogIt ) {
+        LogText( "dxe smm comm region base=0x" );
+        LogHex( Desc->PhysicalStart );
+        LogText( " size=0x" );
+        LogHex( Bytes );
+        LogText( " type=0x" );
+        LogHex( *OriginalType );
+        LogText( "\n" );
       }
-      if ( desc->Type == EFI_CONVENTIONAL_MEMORY ) {
-        desc->Type = EFI_RESERVED_MEMORY_TYPE;
+
+      if ( Desc->Type == EFI_CONVENTIONAL_MEMORY ) {
+        Desc->Type = EFI_RESERVED_MEMORY_TYPE;
       }
-      return ( VOID * )( UINTN )desc->PhysicalStart;
+
+      return ( VOID * )( UINTN )Desc->PhysicalStart;
     }
   }
-  if ( logIt ) {
-    logText( "dxe no usable smm comm region\n" );
+
+  if ( LogIt ) {
+    LogText( "dxe no usable smm comm region\n" );
   }
+
   return 0;
 }
 
-static VOID restoreSmmCommRegionType( VOID *commBuffer, UINT32 originalType ) {
-  CommunicationRegionTable *table = 0;
-  UINT8 *entry;
-  UINTN index;
+static VOID RestoreSmmCommRegionType( VOID *CommBuffer, UINT32 OriginalType ) {
+  CommunicationRegionTable *Table = 0;
+  UINT8 *Entry;
+  UINTN Index;
 
-  if ( commBuffer == 0 || originalType != EFI_CONVENTIONAL_MEMORY || dxe.systemTable == 0 ||
-       dxe.systemTable->ConfigurationTable == 0 ) {
+  if ( CommBuffer == 0 || OriginalType != EFI_CONVENTIONAL_MEMORY || Dxe.SystemTable == 0 ||
+       Dxe.SystemTable->ConfigurationTable == 0 ) {
     return;
   }
-  for ( index = 0; index < dxe.systemTable->NumberOfTableEntries; index++ ) {
-    EFI_CONFIGURATION_TABLE *config = &dxe.systemTable->ConfigurationTable[index];
-    if ( guidEqual( &config->VendorGuid, &communicationRegionGuid ) ) {
-      table = ( CommunicationRegionTable * )config->VendorTable;
+
+  for ( Index = 0; Index < Dxe.SystemTable->NumberOfTableEntries; Index++ ) {
+    EFI_CONFIGURATION_TABLE *Config = &Dxe.SystemTable->ConfigurationTable[Index];
+
+    if ( GuidEqual( &Config->VendorGuid, &CommunicationRegionGuid ) ) {
+      Table = ( CommunicationRegionTable * )Config->VendorTable;
       break;
     }
   }
-  if ( table == 0 ) {
+
+  if ( Table == 0 ) {
     return;
   }
-  entry = ( UINT8 * )( table + 1 );
-  for ( index = 0; index < table->NumberOfEntries; index++ ) {
-    MemoryDescriptor *desc = ( MemoryDescriptor * )( entry + ( index * table->DescriptorSize ) );
-    if ( ( VOID * )( UINTN )desc->PhysicalStart == commBuffer ) {
-      desc->Type = originalType;
+
+  Entry = ( UINT8 * )( Table + 1 );
+
+  for ( Index = 0; Index < Table->NumberOfEntries; Index++ ) {
+    MemoryDescriptor *Desc = ( MemoryDescriptor * )( Entry + ( Index * Table->DescriptorSize ) );
+
+    if ( ( VOID * )( UINTN )Desc->PhysicalStart == CommBuffer ) {
+      Desc->Type = OriginalType;
       return;
     }
   }
 }
 
-EFI_STATUS configureSmm( VOID ) {
-  EFI_SMM_COMMUNICATION_PROTOCOL *smmComm = 0;
-  EFI_SMM_COMMUNICATE_HEADER *header;
-  CONFIG_EXTENDED *message;
-  CONFIG *config;
-  VOID *commBuffer;
-  UINT32 originalRegionType;
-  UINT32 attempt;
-  BOOLEAN logIt;
-  EFI_STATUS status;
-  UINTN commSize;
+EFI_STATUS ConfigureSmm( VOID ) {
+  EFI_SMM_COMMUNICATION_PROTOCOL *SmmComm = 0;
+  EFI_SMM_COMMUNICATE_HEADER *Header;
+  CONFIG_EXTENDED *Message;
+  CONFIG *Config;
+  VOID *CommBuffer;
+  UINT32 OriginalRegionType;
+  UINT32 Attempt;
+  BOOLEAN LogIt;
+  EFI_STATUS Status;
+  UINTN CommSize;
 
-  attempt = ++dxe.configureAttempts;
-  logIt = ( attempt <= 3 );
-  if ( logIt ) {
-    logText( "dxe configure smm attempt=0x" );
-    logHex( attempt );
-    logText( "\n" );
+  Attempt = ++Dxe.ConfigureAttempts;
+  LogIt = ( Attempt <= 3 );
+
+  if ( LogIt ) {
+    LogText( "dxe configure smm attempt=0x" );
+    LogHex( Attempt );
+    LogText( "\n" );
   }
-  status =
-    dxe.systemTable->BootServices->LocateProtocol( &smmCommunicationGuid, 0, ( VOID ** )&smmComm );
-  if ( EFI_ERROR( status ) || smmComm == 0 ) {
-    if ( logIt ) {
-      logStatus(
-        "dxe smm communication unavailable ", EFI_ERROR( status ) ? status : EFI_NOT_FOUND );
+
+  Status =
+    Dxe.SystemTable->BootServices->LocateProtocol( &SmmCommunicationGuid, 0, ( VOID ** )&SmmComm );
+
+  if ( EFI_ERROR( Status ) || SmmComm == 0 ) {
+    if ( LogIt ) {
+      LogStatus(
+        "dxe smm communication unavailable ", EFI_ERROR( Status ) ? Status : EFI_NOT_FOUND );
     }
-    return EFI_ERROR( status ) ? status : EFI_NOT_FOUND;
+
+    return EFI_ERROR( Status ) ? Status : EFI_NOT_FOUND;
   }
-  commSize = sizeof( EFI_SMM_COMMUNICATE_HEADER ) + sizeof( CONFIG_EXTENDED ) + 16;
-  commBuffer = findSmmCommRegion( commSize, &originalRegionType, logIt );
-  if ( commBuffer == 0 ) {
-    if ( logIt ) {
-      logText( "dxe smm configure no comm buffer\n" );
+
+  CommSize = sizeof( EFI_SMM_COMMUNICATE_HEADER ) + sizeof( CONFIG_EXTENDED ) + 16;
+  CommBuffer = FindSmmCommRegion( CommSize, &OriginalRegionType, LogIt );
+
+  if ( CommBuffer == 0 ) {
+    if ( LogIt ) {
+      LogText( "dxe smm configure no comm buffer\n" );
     }
+
     return EFI_NOT_FOUND;
   }
-  memoryClear( commBuffer, commSize );
-  header = ( EFI_SMM_COMMUNICATE_HEADER * )commBuffer;
-  header->HeaderGuid = configCommGuid;
-  header->MessageLength = sizeof( CONFIG_EXTENDED );
-  message = ( CONFIG_EXTENDED * )header->Data;
-  config = &message->Base;
-  message->ExtensionMagic = FAST_CONFIG_MAGIC;
-  message->Features = dxe.fastWmiInstalled ? FEATURE_BUFFER_TRANSFER : 0;
-  config->Magic = CONFIG_MAGIC;
-  config->MailboxPhysical = dxe.mailboxPhysical;
-  config->MailboxSize = MAILBOX_SIZE;
-  config->SwSmiValue = SW_SMI_VALUE;
-  config->Status = EFI_NOT_FOUND;
-  status = smmComm->Communicate( smmComm, header, &commSize );
-  if ( !EFI_ERROR( status ) ) {
-    status = config->Status;
+
+  MemoryClear( CommBuffer, CommSize );
+  Header = ( EFI_SMM_COMMUNICATE_HEADER * )CommBuffer;
+  Header->HeaderGuid = ConfigCommGuid;
+  Header->MessageLength = sizeof( CONFIG_EXTENDED );
+  Message = ( CONFIG_EXTENDED * )Header->Data;
+  Config = &Message->Base;
+  Message->ExtensionMagic = FAST_CONFIG_MAGIC;
+  Message->Features = Dxe.FastWmiInstalled ? FEATURE_BUFFER_TRANSFER : 0;
+  Config->Magic = CONFIG_MAGIC;
+  Config->MailboxPhysical = Dxe.MailboxPhysical;
+  Config->MailboxSize = MAILBOX_SIZE;
+  Config->SwSmiValue = SW_SMI_VALUE;
+  Config->Status = EFI_NOT_FOUND;
+  Status = SmmComm->Communicate( SmmComm, Header, &CommSize );
+
+  if ( !EFI_ERROR( Status ) ) {
+    Status = Config->Status;
   }
-  restoreSmmCommRegionType( commBuffer, originalRegionType );
-  if ( !EFI_ERROR( status ) ) {
-    dxe.configured = 1;
-    logText( "dxe smm configure ok\n" );
-  } else if ( logIt ) {
-    logStatus( "dxe smm configure failed ", status );
-    logText( "dxe smm communicate size=0x" );
-    logHex( commSize );
-    logText( "\n" );
+
+  RestoreSmmCommRegionType( CommBuffer, OriginalRegionType );
+
+  if ( !EFI_ERROR( Status ) ) {
+    Dxe.Configured = 1;
+    LogText( "dxe smm configure ok\n" );
+  } else if ( LogIt ) {
+    LogStatus( "dxe smm configure failed ", Status );
+    LogText( "dxe smm communicate size=0x" );
+    LogHex( CommSize );
+    LogText( "\n" );
   }
-  return status;
+
+  return Status;
 }
