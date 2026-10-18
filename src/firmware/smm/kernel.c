@@ -1,111 +1,83 @@
 #include "internal.h"
 
-static EFI_GUID smmCpuProtocolGuid = {
+static EFI_GUID SmmCpuProtocolGuid = {
   0xeb346b97, 0x975f, 0x4a9f, { 0x8b, 0x22, 0xf8, 0xe9, 0x2b, 0xb3, 0xd5, 0x69 } };
 
-VOID locateSmmCpu( VOID ) {
-  EFI_LOCATE_PROTOCOL locate;
+VOID LocateSmmCpu( VOID ) {
+  EFI_LOCATE_PROTOCOL Locate;
 
-  if ( smm.cpu == 0 ) {
-    locate = ( EFI_LOCATE_PROTOCOL )smm.table->SmmLocateProtocol;
-    locate( &smmCpuProtocolGuid, 0, ( VOID ** )&smm.cpu );
+  if ( Smm.Cpu == 0 ) {
+    Locate = ( EFI_LOCATE_PROTOCOL )Smm.Table->SmmLocateProtocol;
+    Locate( &SmmCpuProtocolGuid, 0, ( VOID ** )&Smm.Cpu );
   }
 }
 
-EFI_STATUS readSavedCr3( UINTN cpuIndex, UINT64 *cr3 ) {
-  locateSmmCpu();
-  if ( smm.cpu != 0 && smm.cpu->ReadSaveState != 0 &&
-       smm.cpu->ReadSaveState( smm.cpu, sizeof( *cr3 ), SAVE_STATE_CR3, cpuIndex, cr3 ) ==
+EFI_STATUS ReadSavedCr3( UINTN CpuIndex, UINT64 *Cr3 ) {
+  LocateSmmCpu();
+
+  if ( Smm.Cpu != 0 && Smm.Cpu->ReadSaveState != 0 &&
+       Smm.Cpu->ReadSaveState( Smm.Cpu, sizeof( *Cr3 ), SAVE_STATE_CR3, CpuIndex, Cr3 ) ==
          EFI_SUCCESS &&
-       *cr3 != 0 ) {
-    *cr3 &= PAGE_MASK;
+       *Cr3 != 0 ) {
+    *Cr3 &= PAGE_MASK;
     return EFI_SUCCESS;
   }
+
   return EFI_NOT_FOUND;
 }
 
-BOOLEAN looksLikeProcessList( UINT64 eprocess, UINT32 pidOffset ) {
-  UINT64 flink;
-  UINT64 blink;
-  UINT64 back;
+BOOLEAN LooksLikeProcessList( UINT64 Eprocess, UINT32 PidOffset ) {
+  UINT64 Flink;
+  UINT64 Blink;
+  UINT64 Back;
 
-  if ( readVirtual64( smm.kernelCr3, eprocess + pidOffset + 8, &flink ) != EFI_SUCCESS ||
-       readVirtual64( smm.kernelCr3, eprocess + pidOffset + 16, &blink ) != EFI_SUCCESS ||
-       !isKernelPointer( flink ) || !isKernelPointer( blink ) ||
-       readVirtual64( smm.kernelCr3, flink + 8, &back ) != EFI_SUCCESS ) {
+  if ( ReadVirtual64( Smm.KernelCr3, Eprocess + PidOffset + 8, &Flink ) != EFI_SUCCESS ||
+       ReadVirtual64( Smm.KernelCr3, Eprocess + PidOffset + 16, &Blink ) != EFI_SUCCESS ||
+       !IsKernelPointer( Flink ) || !IsKernelPointer( Blink ) ||
+       ReadVirtual64( Smm.KernelCr3, Flink + 8, &Back ) != EFI_SUCCESS ) {
     return 0;
   }
-  return back == eprocess + pidOffset + 8;
+
+  return Back == Eprocess + PidOffset + 8;
 }
 
-EFI_STATUS resolveListLayout( VOID ) {
-  UINT32 pidOffset;
+EFI_STATUS ResolveListLayout( VOID ) {
+  UINT32 PidOffset;
 
-  if ( !isKernelPointer( smm.systemProcess ) ) {
+  if ( !IsKernelPointer( Smm.SystemProcess ) ) {
     return EFI_NOT_FOUND;
   }
-  for ( pidOffset = 0x20; pidOffset < 0x900; pidOffset += 8 ) {
-    UINT64 pid;
-    if ( readVirtual64( smm.kernelCr3, smm.systemProcess + pidOffset, &pid ) == EFI_SUCCESS &&
-         ( UINT32 )pid == 4 && looksLikeProcessList( smm.systemProcess, pidOffset ) ) {
-      smm.pidOffset = pidOffset;
-      smm.linksOffset = pidOffset + 8;
+
+  for ( PidOffset = 0x20; PidOffset < 0x900; PidOffset += 8 ) {
+    UINT64 Pid;
+
+    if ( ReadVirtual64( Smm.KernelCr3, Smm.SystemProcess + PidOffset, &Pid ) == EFI_SUCCESS &&
+         ( UINT32 )Pid == 4 && LooksLikeProcessList( Smm.SystemProcess, PidOffset ) ) {
+      Smm.PidOffset = PidOffset;
+      Smm.LinksOffset = PidOffset + 8;
       return EFI_SUCCESS;
     }
   }
+
   return EFI_NOT_FOUND;
 }
 
-EFI_STATUS resolveNameOffset( VOID ) {
-  UINT32 offset;
+EFI_STATUS ResolveNameOffset( VOID ) {
+  UINT32 Offset;
 
-  if ( smm.nameOffset != 0 ) {
+  if ( Smm.NameOffset != 0 ) {
     return EFI_SUCCESS;
   }
-  for ( offset = 0x100; offset < 0x900; offset++ ) {
-    char name[NAME_SIZE];
-    memoryClear( name, sizeof( name ) );
-    if ( copyVirtual( smm.kernelCr3, smm.systemProcess + offset, name, sizeof( name ) - 1, 0 ) ==
+
+  for ( Offset = 0x100; Offset < 0x900; Offset++ ) {
+    char Name[NAME_SIZE];
+
+    MemoryClear( Name, sizeof( Name ) );
+
+    if ( CopyVirtual( Smm.KernelCr3, Smm.SystemProcess + Offset, Name, sizeof( Name ) - 1, 0 ) ==
            EFI_SUCCESS &&
-         sameName( name, "System" ) ) {
-      smm.nameOffset = offset;
-      return EFI_SUCCESS;
-    }
-  }
-  return EFI_NOT_FOUND;
-}
-
-EFI_STATUS resolveCr3Offset( VOID ) {
-  UINT32 offset = smm.cr3Offset;
-
-  if ( offset != 0 ) {
-    UINT64 cr3;
-    UINT16 mz;
-
-    if ( readVirtual64( smm.kernelCr3, smm.systemProcess + offset, &cr3 ) == EFI_SUCCESS &&
-         cr3 != 0 && ( cr3 & ( PAGE_SIZE - 1 ) ) == 0 &&
-         readVirtual16( cr3, smm.kernelBase, &mz ) == EFI_SUCCESS && mz == 0x5A4D ) {
-      smm.kernelCr3 = cr3;
-      smm.kernelStable = 1;
-      return EFI_SUCCESS;
-    }
-
-    smm.cr3Offset = 0;
-  }
-
-  for ( offset = 0x20; offset < 0x100; offset += 8 ) {
-    UINT64 cr3;
-    UINT16 mz;
-
-    if ( readVirtual64( smm.kernelCr3, smm.systemProcess + offset, &cr3 ) != EFI_SUCCESS ||
-         cr3 == 0 || ( cr3 & ( PAGE_SIZE - 1 ) ) != 0 ) {
-      continue;
-    }
-
-    if ( readVirtual16( cr3, smm.kernelBase, &mz ) == EFI_SUCCESS && mz == 0x5A4D ) {
-      smm.cr3Offset = offset;
-      smm.kernelCr3 = cr3;
-      smm.kernelStable = 1;
+         SameName( Name, "System" ) ) {
+      Smm.NameOffset = Offset;
       return EFI_SUCCESS;
     }
   }
@@ -113,68 +85,118 @@ EFI_STATUS resolveCr3Offset( VOID ) {
   return EFI_NOT_FOUND;
 }
 
-EFI_STATUS tryKernelCr3( UINT64 cr3, UINT64 lstar ) {
-  UINT64 start;
-  UINT64 limit;
-  UINT64 base;
-  UINT64 export;
+EFI_STATUS ResolveCr3Offset( VOID ) {
+  UINT32 Offset = Smm.Cr3Offset;
 
-  smm.kernelStable = 0;
-  smm.kernelCr3 = cr3 & PAGE_MASK;
-  start = lstar & PAGE_2MB_MASK;
-  limit = start > 0x10000000ULL ? start - 0x10000000ULL : 0;
-  for ( base = start; base > limit; base -= PAGE_2MB_SIZE ) {
-    UINT16 mz;
-    if ( readVirtual16( smm.kernelCr3, base, &mz ) != EFI_SUCCESS || mz != 0x5A4D ) {
+  if ( Offset != 0 ) {
+    UINT64 Cr3;
+    UINT16 Mz;
+
+    if ( ReadVirtual64( Smm.KernelCr3, Smm.SystemProcess + Offset, &Cr3 ) == EFI_SUCCESS &&
+         Cr3 != 0 && ( Cr3 & ( PAGE_SIZE - 1 ) ) == 0 &&
+         ReadVirtual16( Cr3, Smm.KernelBase, &Mz ) == EFI_SUCCESS && Mz == 0x5A4D ) {
+      Smm.KernelCr3 = Cr3;
+      Smm.KernelStable = 1;
+      return EFI_SUCCESS;
+    }
+
+    Smm.Cr3Offset = 0;
+  }
+
+  for ( Offset = 0x20; Offset < 0x100; Offset += 8 ) {
+    UINT64 Cr3;
+    UINT16 Mz;
+
+    if ( ReadVirtual64( Smm.KernelCr3, Smm.SystemProcess + Offset, &Cr3 ) != EFI_SUCCESS ||
+         Cr3 == 0 || ( Cr3 & ( PAGE_SIZE - 1 ) ) != 0 ) {
       continue;
     }
-    if ( resolveExport( smm.kernelCr3, base, "PsInitialSystemProcess", &export ) == EFI_SUCCESS ) {
-      smm.kernelBase = base;
-      if ( readVirtual64( smm.kernelCr3, export, &smm.systemProcess ) != EFI_SUCCESS ) {
+
+    if ( ReadVirtual16( Cr3, Smm.KernelBase, &Mz ) == EFI_SUCCESS && Mz == 0x5A4D ) {
+      Smm.Cr3Offset = Offset;
+      Smm.KernelCr3 = Cr3;
+      Smm.KernelStable = 1;
+      return EFI_SUCCESS;
+    }
+  }
+
+  return EFI_NOT_FOUND;
+}
+
+EFI_STATUS TryKernelCr3( UINT64 Cr3, UINT64 Lstar ) {
+  UINT64 Start;
+  UINT64 Limit;
+  UINT64 Base;
+  UINT64 Export;
+
+  Smm.KernelStable = 0;
+  Smm.KernelCr3 = Cr3 & PAGE_MASK;
+  Start = Lstar & PAGE_2MB_MASK;
+  Limit = Start > 0x10000000ULL ? Start - 0x10000000ULL : 0;
+
+  for ( Base = Start; Base > Limit; Base -= PAGE_2MB_SIZE ) {
+    UINT16 Mz;
+
+    if ( ReadVirtual16( Smm.KernelCr3, Base, &Mz ) != EFI_SUCCESS || Mz != 0x5A4D ) {
+      continue;
+    }
+
+    if ( ResolveExport( Smm.KernelCr3, Base, "PsInitialSystemProcess", &Export ) == EFI_SUCCESS ) {
+      Smm.KernelBase = Base;
+
+      if ( ReadVirtual64( Smm.KernelCr3, Export, &Smm.SystemProcess ) != EFI_SUCCESS ) {
         return EFI_NOT_FOUND;
       }
-      resolveExport( smm.kernelCr3, base, "PsLoadedModuleList", &smm.loadedModuleList );
-      ( void )resolveCr3Offset();
+
+      ResolveExport( Smm.KernelCr3, Base, "PsLoadedModuleList", &Smm.LoadedModuleList );
+      ( void )ResolveCr3Offset();
       return EFI_SUCCESS;
     }
   }
+
   return EFI_NOT_FOUND;
 }
 
-EFI_STATUS initKernel( VOID ) {
-  UINT64 lstar;
-  UINT64 cr3;
-  UINTN cpu;
+EFI_STATUS InitKernel( VOID ) {
+  UINT64 Lstar;
+  UINT64 Cr3;
+  UINTN Cpu;
 
-  if ( smm.kernelBase != 0 && smm.systemProcess != 0 ) {
-    if ( smm.kernelStable || resolveCr3Offset() == EFI_SUCCESS ) {
+  if ( Smm.KernelBase != 0 && Smm.SystemProcess != 0 ) {
+    if ( Smm.KernelStable || ResolveCr3Offset() == EFI_SUCCESS ) {
       return EFI_SUCCESS;
     }
   }
-  lstar = __readmsr( MSR_LSTAR );
-  for ( cpu = 0; cpu < smm.table->NumberOfCpus; cpu++ ) {
-    if ( readSavedCr3( cpu, &cr3 ) == EFI_SUCCESS && cr3 < 0x100000000ULL &&
-         tryKernelCr3( cr3, lstar ) == EFI_SUCCESS ) {
+
+  Lstar = __readmsr( MSR_LSTAR );
+
+  for ( Cpu = 0; Cpu < Smm.Table->NumberOfCpus; Cpu++ ) {
+    if ( ReadSavedCr3( Cpu, &Cr3 ) == EFI_SUCCESS && Cr3 < 0x100000000ULL &&
+         TryKernelCr3( Cr3, Lstar ) == EFI_SUCCESS ) {
       return EFI_SUCCESS;
     }
   }
-  for ( cpu = 0; cpu < smm.table->NumberOfCpus; cpu++ ) {
-    if ( readSavedCr3( cpu, &cr3 ) == EFI_SUCCESS && tryKernelCr3( cr3, lstar ) == EFI_SUCCESS ) {
+
+  for ( Cpu = 0; Cpu < Smm.Table->NumberOfCpus; Cpu++ ) {
+    if ( ReadSavedCr3( Cpu, &Cr3 ) == EFI_SUCCESS && TryKernelCr3( Cr3, Lstar ) == EFI_SUCCESS ) {
       return EFI_SUCCESS;
     }
   }
-  cr3 = __readcr3() & PAGE_MASK;
-  return tryKernelCr3( cr3, lstar );
+
+  Cr3 = __readcr3() & PAGE_MASK;
+  return TryKernelCr3( Cr3, Lstar );
 }
 
-EFI_STATUS resolveProcessLayout( VOID ) {
-  if ( smm.pidOffset != 0 && smm.linksOffset != 0 && smm.cr3Offset != 0 ) {
+EFI_STATUS ResolveProcessLayout( VOID ) {
+  if ( Smm.PidOffset != 0 && Smm.LinksOffset != 0 && Smm.Cr3Offset != 0 ) {
     return EFI_SUCCESS;
   }
-  if ( initKernel() != EFI_SUCCESS || resolveListLayout() != EFI_SUCCESS ||
-       resolveCr3Offset() != EFI_SUCCESS ) {
+
+  if ( InitKernel() != EFI_SUCCESS || ResolveListLayout() != EFI_SUCCESS ||
+       ResolveCr3Offset() != EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
-  resolveNameOffset();
+
+  ResolveNameOffset();
   return EFI_SUCCESS;
 }

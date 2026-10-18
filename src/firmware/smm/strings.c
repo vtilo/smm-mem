@@ -1,122 +1,134 @@
 #include "internal.h"
 
-VOID copyText( char *out, UINTN outSize, const char *text ) {
-  UINTN index;
-  if ( outSize == 0 ) {
+VOID CopyText( char *Out, UINTN OutSize, const char *Text ) {
+  UINTN Index;
+
+  if ( OutSize == 0 ) {
     return;
   }
-  for ( index = 0; index + 1 < outSize && text[index] != 0; index++ ) {
-    out[index] = text[index];
+
+  for ( Index = 0; Index + 1 < OutSize && Text[Index] != 0; Index++ ) {
+    Out[Index] = Text[Index];
   }
-  out[index] = 0;
+
+  Out[Index] = 0;
 }
 
-char lowerChar( char ch ) {
-  if ( ch >= 'A' && ch <= 'Z' ) {
-    return ( char )( ch + ( 'a' - 'A' ) );
+char LowerChar( char Ch ) {
+  if ( Ch >= 'A' && Ch <= 'Z' ) {
+    return ( char )( Ch + ( 'a' - 'A' ) );
   }
-  return ch;
+
+  return Ch;
 }
 
-BOOLEAN sameName( const char *a, const char *b ) {
-  while ( *a != 0 && *b != 0 ) {
-    if ( lowerChar( *a++ ) != lowerChar( *b++ ) ) {
+BOOLEAN SameName( const char *A, const char *B ) {
+  while ( *A != 0 && *B != 0 ) {
+    if ( LowerChar( *A++ ) != LowerChar( *B++ ) ) {
       return 0;
     }
   }
-  return *a == 0 && *b == 0;
+
+  return *A == 0 && *B == 0;
 }
 
-const char *baseName( const char *path ) {
-  const char *name = path;
+const char *BaseName( const char *Path ) {
+  const char *Name = Path;
 
-  while ( *path != 0 ) {
-    if ( *path == '\\' || *path == '/' ) {
-      name = path + 1;
+  while ( *Path != 0 ) {
+    if ( *Path == '\\' || *Path == '/' ) {
+      Name = Path + 1;
     }
-    path++;
+
+    Path++;
   }
-  return name;
+
+  return Name;
 }
 
-BOOLEAN sameBaseName( const char *path, const char *name ) {
-  return sameName( baseName( path ), name );
+BOOLEAN SameBaseName( const char *Path, const char *Name ) {
+  return SameName( BaseName( Path ), Name );
 }
 
-EFI_STATUS readAscii( UINT64 cr3, UINT64 va, char *out, UINTN outSize ) {
-  UINTN done = 0;
+EFI_STATUS ReadAscii( UINT64 Cr3, UINT64 Va, char *Out, UINTN OutSize ) {
+  UINTN Done = 0;
 
-  if ( outSize == 0 ) {
+  if ( OutSize == 0 ) {
     return EFI_INVALID_PARAMETER;
   }
 
-  while ( done + 1 < outSize ) {
-    UINTN count = outSize - done - 1;
-    UINTN pageLeft = ( UINTN )( PAGE_SIZE - ( ( va + done ) & ( PAGE_SIZE - 1 ) ) );
-    UINTN i;
+  while ( Done + 1 < OutSize ) {
+    UINTN Count = OutSize - Done - 1;
+    UINTN PageLeft = ( UINTN )( PAGE_SIZE - ( ( Va + Done ) & ( PAGE_SIZE - 1 ) ) );
+    UINTN I;
 
-    if ( count > pageLeft ) {
-      count = pageLeft;
+    if ( Count > PageLeft ) {
+      Count = PageLeft;
     }
-    if ( count > 64 ) {
-      count = 64;
+
+    if ( Count > 64 ) {
+      Count = 64;
     }
-    if ( copyVirtual( cr3, va + done, out + done, count, 0 ) != EFI_SUCCESS ) {
+
+    if ( CopyVirtual( Cr3, Va + Done, Out + Done, Count, 0 ) != EFI_SUCCESS ) {
       return EFI_NOT_FOUND;
     }
 
-    for ( i = 0; i < count; i++ ) {
-      if ( out[done + i] == 0 ) {
+    for ( I = 0; I < Count; I++ ) {
+      if ( Out[Done + I] == 0 ) {
         return EFI_SUCCESS;
       }
     }
 
-    done += count;
+    Done += Count;
   }
 
-  out[done] = 0;
+  Out[Done] = 0;
   return EFI_SUCCESS;
 }
 
-EFI_STATUS readUnicodeName( UINT64 cr3, UINT64 stringAddress, char *out, UINTN outSize ) {
+EFI_STATUS ReadUnicodeName( UINT64 Cr3, UINT64 StringAddress, char *Out, UINTN OutSize ) {
   struct {
-    UINT16 length;
-    UINT16 maximumLength;
-    UINT32 padding;
-    UINT64 buffer;
-  } string;
-  UINTN count;
-  UINTN done = 0;
+    UINT16 Length;
+    UINT16 MaximumLength;
+    UINT32 Padding;
+    UINT64 Buffer;
+  } String;
+  UINTN Count;
+  UINTN Done = 0;
 
-  if ( outSize == 0 ||
-       copyVirtual( cr3, stringAddress, &string, sizeof( string ), 0 ) != EFI_SUCCESS ||
-       string.buffer == 0 ) {
+  if ( OutSize == 0 ||
+       CopyVirtual( Cr3, StringAddress, &String, sizeof( String ), 0 ) != EFI_SUCCESS ||
+       String.Buffer == 0 ) {
     return EFI_NOT_FOUND;
   }
 
-  count = string.length / 2;
-  if ( count + 1 > outSize ) {
-    count = outSize - 1;
+  Count = String.Length / 2;
+
+  if ( Count + 1 > OutSize ) {
+    Count = OutSize - 1;
   }
 
-  while ( done < count ) {
-    UINT16 chars[32];
-    UINTN chunk = count - done;
-    UINTN i;
+  while ( Done < Count ) {
+    UINT16 Chars[32];
+    UINTN Chunk = Count - Done;
+    UINTN I;
 
-    if ( chunk > 32 ) {
-      chunk = 32;
+    if ( Chunk > 32 ) {
+      Chunk = 32;
     }
-    if ( copyVirtual( cr3, string.buffer + done * 2, chars, chunk * 2, 0 ) != EFI_SUCCESS ) {
+
+    if ( CopyVirtual( Cr3, String.Buffer + Done * 2, Chars, Chunk * 2, 0 ) != EFI_SUCCESS ) {
       return EFI_NOT_FOUND;
     }
 
-    for ( i = 0; i < chunk; i++ ) {
-      out[done + i] = ( char )( chars[i] & 0xFF );
+    for ( I = 0; I < Chunk; I++ ) {
+      Out[Done + I] = ( char )( Chars[I] & 0xFF );
     }
-    done += chunk;
+
+    Done += Chunk;
   }
 
-  out[done] = 0;
+  Out[Done] = 0;
   return EFI_SUCCESS;
 }

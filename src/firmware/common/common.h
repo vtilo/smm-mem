@@ -43,22 +43,4 @@ extern EFI_GUID SmmCommunicationGuid;
 extern EFI_GUID AcpiTableGuid;
 extern EFI_GUID FastWmiGuid;
 
-
-// Keep SMM helper names available during the naming update
-#define memoryCopy MemoryCopy
-#define memoryClear MemoryClear
-#define guidEqual GuidEqual
-#define serialInit SerialInit
-#define logText LogText
-#define logHex LogHex
-#define logStatus LogStatus
-#define configCommGuid ConfigCommGuid
-#define wmiGuid WmiGuid
-#define configGuid ConfigGuid
-#define smmBase2Guid SmmBase2Guid
-#define smmSwDispatchGuid SmmSwDispatchGuid
-#define smmCommunicationGuid SmmCommunicationGuid
-#define acpiTableGuid AcpiTableGuid
-#define fastWmiGuid FastWmiGuid
-
 #endif

@@ -1,123 +1,128 @@
 #include "internal.h"
 
 typedef struct {
-  UINT32 characteristics;
-  UINT32 timestamp;
-  UINT16 majorVersion;
-  UINT16 minorVersion;
-  UINT32 name;
-  UINT32 ordinalBase;
-  UINT32 functions;
-  UINT32 names;
-  UINT32 functionTable;
-  UINT32 nameTable;
-  UINT32 ordinalTable;
+  UINT32 Characteristics;
+  UINT32 Timestamp;
+  UINT16 MajorVersion;
+  UINT16 MinorVersion;
+  UINT32 Name;
+  UINT32 OrdinalBase;
+  UINT32 Functions;
+  UINT32 Names;
+  UINT32 FunctionTable;
+  UINT32 NameTable;
+  UINT32 OrdinalTable;
 } ExportDirectory;
 
-static int compareExportName( const char *left, const char *right ) {
-  while ( *left != 0 && *left == *right ) {
-    left++;
-    right++;
+static int CompareExportName( const char *Left, const char *Right ) {
+  while ( *Left != 0 && *Left == *Right ) {
+    Left++;
+    Right++;
   }
 
-  return ( int )( unsigned char )*left - ( int )( unsigned char )*right;
+  return ( int )( unsigned char )*Left - ( int )( unsigned char )*Right;
 }
 
-static EFI_STATUS readExportName( UINT64 cr3,
-  UINT64 base,
-  const ExportDirectory *directory,
-  UINT32 index,
-  char *name,
-  UINTN size ) {
-  UINT32 rva;
+static EFI_STATUS ReadExportName( UINT64 Cr3,
+  UINT64 Base,
+  const ExportDirectory *Directory,
+  UINT32 Index,
+  char *Name,
+  UINTN Size ) {
+  UINT32 Rva;
 
-  if ( readVirtual32( cr3, base + directory->nameTable + ( UINT64 )index * 4, &rva ) !=
+  if ( ReadVirtual32( Cr3, Base + Directory->NameTable + ( UINT64 )Index * 4, &Rva ) !=
        EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
 
-  return readAscii( cr3, base + rva, name, size );
+  return ReadAscii( Cr3, Base + Rva, Name, Size );
 }
 
-static EFI_STATUS resolveExportIndex(
-  UINT64 cr3, UINT64 base, const ExportDirectory *directory, UINT32 index, UINT64 *address ) {
-  UINT16 ordinal;
-  UINT32 rva;
+static EFI_STATUS ResolveExportIndex(
+  UINT64 Cr3, UINT64 Base, const ExportDirectory *Directory, UINT32 Index, UINT64 *Address ) {
+  UINT16 Ordinal;
+  UINT32 Rva;
 
-  if ( readVirtual16( cr3, base + directory->ordinalTable + ( UINT64 )index * 2, &ordinal ) !=
+  if ( ReadVirtual16( Cr3, Base + Directory->OrdinalTable + ( UINT64 )Index * 2, &Ordinal ) !=
          EFI_SUCCESS ||
-       ordinal >= directory->functions ||
-       readVirtual32( cr3, base + directory->functionTable + ( UINT64 )ordinal * 4, &rva ) !=
+       Ordinal >= Directory->Functions ||
+       ReadVirtual32( Cr3, Base + Directory->FunctionTable + ( UINT64 )Ordinal * 4, &Rva ) !=
          EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
 
-  *address = base + rva;
+  *Address = Base + Rva;
   return EFI_SUCCESS;
 }
 
-EFI_STATUS resolveExport( UINT64 cr3, UINT64 base, const char *name, UINT64 *address ) {
-  UINT16 mz;
-  UINT32 pe;
-  UINT32 signature;
-  UINT16 magic;
-  UINT64 directoryOffset;
-  UINT32 exportRva;
-  ExportDirectory directory;
-  UINT32 low = 0;
-  UINT32 high;
-  UINT32 index;
+EFI_STATUS ResolveExport( UINT64 Cr3, UINT64 Base, const char *Name, UINT64 *Address ) {
+  UINT16 Mz;
+  UINT32 Pe;
+  UINT32 Signature;
+  UINT16 Magic;
+  UINT64 DirectoryOffset;
+  UINT32 ExportRva;
+  ExportDirectory Directory;
+  UINT32 Low = 0;
+  UINT32 High;
+  UINT32 Index;
 
-  if ( readVirtual16( cr3, base, &mz ) != EFI_SUCCESS || mz != 0x5A4D ||
-       readVirtual32( cr3, base + 0x3C, &pe ) != EFI_SUCCESS ||
-       readVirtual32( cr3, base + pe, &signature ) != EFI_SUCCESS || signature != 0x00004550 ||
-       readVirtual16( cr3, base + pe + 0x18, &magic ) != EFI_SUCCESS ) {
+  if ( ReadVirtual16( Cr3, Base, &Mz ) != EFI_SUCCESS || Mz != 0x5A4D ||
+       ReadVirtual32( Cr3, Base + 0x3C, &Pe ) != EFI_SUCCESS ||
+       ReadVirtual32( Cr3, Base + Pe, &Signature ) != EFI_SUCCESS || Signature != 0x00004550 ||
+       ReadVirtual16( Cr3, Base + Pe + 0x18, &Magic ) != EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
 
-  directoryOffset = base + pe + 0x18 + ( magic == 0x20B ? 0x70 : 0x60 );
-  if ( readVirtual32( cr3, directoryOffset, &exportRva ) != EFI_SUCCESS || exportRva == 0 ||
-       copyVirtual( cr3, base + exportRva, &directory, sizeof( directory ), 0 ) != EFI_SUCCESS ) {
+  DirectoryOffset = Base + Pe + 0x18 + ( Magic == 0x20B ? 0x70 : 0x60 );
+
+  if ( ReadVirtual32( Cr3, DirectoryOffset, &ExportRva ) != EFI_SUCCESS || ExportRva == 0 ||
+       CopyVirtual( Cr3, Base + ExportRva, &Directory, sizeof( Directory ), 0 ) != EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
 
-  if ( directory.names > 65536 ) {
-    directory.names = 65536;
+  if ( Directory.Names > 65536 ) {
+    Directory.Names = 65536;
   }
-  high = directory.names;
 
-  // PE export names are normally sorted. Keep the original linear fallback
-  // for case-insensitive requests and images with an unusual name table.
-  while ( low < high ) {
-    UINT32 middle = low + ( high - low ) / 2;
-    char exportName[128];
-    int order;
+  High = Directory.Names;
 
-    if ( readExportName( cr3, base, &directory, middle, exportName, sizeof( exportName ) ) !=
+  // Keep a linear fallback for case insensitive requests and unusual export tables
+
+  while ( Low < High ) {
+    UINT32 Middle = Low + ( High - Low ) / 2;
+    char ExportName[128];
+    int Order;
+
+    if ( ReadExportName( Cr3, Base, &Directory, Middle, ExportName, sizeof( ExportName ) ) !=
          EFI_SUCCESS ) {
       break;
     }
-    order = compareExportName( exportName, name );
-    if ( order == 0 ) {
-      return resolveExportIndex( cr3, base, &directory, middle, address );
+
+    Order = CompareExportName( ExportName, Name );
+
+    if ( Order == 0 ) {
+      return ResolveExportIndex( Cr3, Base, &Directory, Middle, Address );
     }
-    if ( order < 0 ) {
-      low = middle + 1;
+
+    if ( Order < 0 ) {
+      Low = Middle + 1;
     } else {
-      high = middle;
+      High = Middle;
     }
   }
 
-  for ( index = 0; index < directory.names; index++ ) {
-    char exportName[128];
+  for ( Index = 0; Index < Directory.Names; Index++ ) {
+    char ExportName[128];
 
-    if ( readExportName( cr3, base, &directory, index, exportName, sizeof( exportName ) ) !=
+    if ( ReadExportName( Cr3, Base, &Directory, Index, ExportName, sizeof( ExportName ) ) !=
            EFI_SUCCESS ||
-         !sameName( exportName, name ) ) {
+         !SameName( ExportName, Name ) ) {
       continue;
     }
 
-    return resolveExportIndex( cr3, base, &directory, index, address );
+    return ResolveExportIndex( Cr3, Base, &Directory, Index, Address );
   }
 
   return EFI_NOT_FOUND;

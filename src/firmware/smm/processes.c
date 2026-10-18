@@ -1,246 +1,285 @@
 #include "internal.h"
 
-EFI_STATUS getProcessCr3( UINT64 eprocess, UINT64 *cr3 ) {
-  if ( smm.cr3Offset == 0 ||
-       readVirtual64( smm.kernelCr3, eprocess + smm.cr3Offset, cr3 ) != EFI_SUCCESS || *cr3 == 0 ) {
+EFI_STATUS GetProcessCr3( UINT64 Eprocess, UINT64 *Cr3 ) {
+  if ( Smm.Cr3Offset == 0 ||
+       ReadVirtual64( Smm.KernelCr3, Eprocess + Smm.Cr3Offset, Cr3 ) != EFI_SUCCESS || *Cr3 == 0 ) {
     return EFI_NOT_FOUND;
   }
-  *cr3 &= PAGE_MASK;
-  return *cr3 != 0 ? EFI_SUCCESS : EFI_NOT_FOUND;
+
+  *Cr3 &= PAGE_MASK;
+  return *Cr3 != 0 ? EFI_SUCCESS : EFI_NOT_FOUND;
 }
 
-EFI_STATUS findPeb( UINT64 eprocess, UINT64 cr3, UINT64 *peb ) {
-  UINT32 offset;
-  UINT32 listOffsets[] = { 0x10, 0x20, 0x30 };
-  UINT32 biases[] = { 0x00, 0x10, 0x20 };
-  UINTN index;
+EFI_STATUS FindPeb( UINT64 Eprocess, UINT64 Cr3, UINT64 *Peb ) {
+  UINT32 Offset;
+  UINT32 ListOffsets[] = { 0x10, 0x20, 0x30 };
+  UINT32 Biases[] = { 0x00, 0x10, 0x20 };
+  UINTN Index;
 
-  if ( smm.pebOffset != 0 &&
-       readVirtual64( smm.kernelCr3, eprocess + smm.pebOffset, peb ) == EFI_SUCCESS &&
-       isUserPointer( *peb ) ) {
+  if ( Smm.PebOffset != 0 &&
+       ReadVirtual64( Smm.KernelCr3, Eprocess + Smm.PebOffset, Peb ) == EFI_SUCCESS &&
+       IsUserPointer( *Peb ) ) {
     return EFI_SUCCESS;
   }
-  for ( offset = 0x100; offset < 0x900; offset += 8 ) {
-    UINT64 candidate;
-    UINT64 ldr;
-    if ( readVirtual64( smm.kernelCr3, eprocess + offset, &candidate ) != EFI_SUCCESS ||
-         !isUserPointer( candidate ) ||
-         readVirtual64( cr3, candidate + 0x18, &ldr ) != EFI_SUCCESS || !isUserPointer( ldr ) ) {
+
+  for ( Offset = 0x100; Offset < 0x900; Offset += 8 ) {
+    UINT64 Candidate;
+    UINT64 Ldr;
+
+    if ( ReadVirtual64( Smm.KernelCr3, Eprocess + Offset, &Candidate ) != EFI_SUCCESS ||
+         !IsUserPointer( Candidate ) ||
+         ReadVirtual64( Cr3, Candidate + 0x18, &Ldr ) != EFI_SUCCESS || !IsUserPointer( Ldr ) ) {
       continue;
     }
-    for ( index = 0; index < sizeof( listOffsets ) / sizeof( listOffsets[0] ); index++ ) {
-      UINT64 head = ldr + listOffsets[index];
-      UINT64 link;
-      UINT64 base;
-      UINT16 mz;
-      if ( readVirtual64( cr3, head, &link ) == EFI_SUCCESS && isUserPointer( link ) &&
-           link != head &&
-           readVirtual64( cr3, link + 0x30 - biases[index], &base ) == EFI_SUCCESS &&
-           isUserPointer( base ) && readVirtual16( cr3, base, &mz ) == EFI_SUCCESS &&
-           mz == 0x5A4D ) {
-        smm.pebOffset = offset;
-        *peb = candidate;
+
+    for ( Index = 0; Index < sizeof( ListOffsets ) / sizeof( ListOffsets[0] ); Index++ ) {
+      UINT64 Head = Ldr + ListOffsets[Index];
+      UINT64 Link;
+      UINT64 Base;
+      UINT16 Mz;
+
+      if ( ReadVirtual64( Cr3, Head, &Link ) == EFI_SUCCESS && IsUserPointer( Link ) &&
+           Link != Head &&
+           ReadVirtual64( Cr3, Link + 0x30 - Biases[Index], &Base ) == EFI_SUCCESS &&
+           IsUserPointer( Base ) && ReadVirtual16( Cr3, Base, &Mz ) == EFI_SUCCESS &&
+           Mz == 0x5A4D ) {
+        Smm.PebOffset = Offset;
+        *Peb = Candidate;
         return EFI_SUCCESS;
       }
     }
   }
+
   return EFI_NOT_FOUND;
 }
 
-EFI_STATUS findImageBase( UINT64 eprocess, UINT64 cr3, UINT64 *base ) {
-  UINT64 peb;
-  UINT64 ldr;
-  UINT32 listOffsets[] = { 0x10, 0x20, 0x30 };
-  UINT32 biases[] = { 0x00, 0x10, 0x20 };
-  UINTN index;
-  if ( findPeb( eprocess, cr3, &peb ) == EFI_SUCCESS &&
-       readVirtual64( cr3, peb + 0x18, &ldr ) == EFI_SUCCESS && isUserPointer( ldr ) ) {
-    for ( index = 0; index < sizeof( listOffsets ) / sizeof( listOffsets[0] ); index++ ) {
-      UINT64 head = ldr + listOffsets[index];
-      UINT64 link;
-      if ( readVirtual64( cr3, head, &link ) == EFI_SUCCESS && isUserPointer( link ) &&
-           link != head && readVirtual64( cr3, link + 0x30 - biases[index], base ) == EFI_SUCCESS &&
-           isUserPointer( *base ) ) {
+EFI_STATUS FindImageBase( UINT64 Eprocess, UINT64 Cr3, UINT64 *Base ) {
+  UINT64 Peb;
+  UINT64 Ldr;
+  UINT32 ListOffsets[] = { 0x10, 0x20, 0x30 };
+  UINT32 Biases[] = { 0x00, 0x10, 0x20 };
+  UINTN Index;
+
+  if ( FindPeb( Eprocess, Cr3, &Peb ) == EFI_SUCCESS &&
+       ReadVirtual64( Cr3, Peb + 0x18, &Ldr ) == EFI_SUCCESS && IsUserPointer( Ldr ) ) {
+    for ( Index = 0; Index < sizeof( ListOffsets ) / sizeof( ListOffsets[0] ); Index++ ) {
+      UINT64 Head = Ldr + ListOffsets[Index];
+      UINT64 Link;
+
+      if ( ReadVirtual64( Cr3, Head, &Link ) == EFI_SUCCESS && IsUserPointer( Link ) &&
+           Link != Head && ReadVirtual64( Cr3, Link + 0x30 - Biases[Index], Base ) == EFI_SUCCESS &&
+           IsUserPointer( *Base ) ) {
         return EFI_SUCCESS;
       }
     }
   }
-  *base = 0;
+
+  *Base = 0;
   return EFI_NOT_FOUND;
 }
 
-EFI_STATUS readProcessImagePath( UINT64 eprocess, UINT64 cr3, char *out, UINTN outSize ) {
-  UINT64 peb;
-  UINT64 params;
+EFI_STATUS ReadProcessImagePath( UINT64 Eprocess, UINT64 Cr3, char *Out, UINTN OutSize ) {
+  UINT64 Peb;
+  UINT64 Params;
 
-  if ( findPeb( eprocess, cr3, &peb ) != EFI_SUCCESS ||
-       readVirtual64( cr3, peb + 0x20, &params ) != EFI_SUCCESS || !isUserPointer( params ) ) {
+  if ( FindPeb( Eprocess, Cr3, &Peb ) != EFI_SUCCESS ||
+       ReadVirtual64( Cr3, Peb + 0x20, &Params ) != EFI_SUCCESS || !IsUserPointer( Params ) ) {
     return EFI_NOT_FOUND;
   }
-  return readUnicodeName( cr3, params + 0x60, out, outSize );
+
+  return ReadUnicodeName( Cr3, Params + 0x60, Out, OutSize );
 }
 
-EFI_STATUS fillProcessInfo( UINT64 eprocess, PROCESS_INFO *info ) {
-  UINT64 pid;
-  UINT64 cr3;
-  char imagePath[260];
+EFI_STATUS FillProcessInfo( UINT64 Eprocess, PROCESS_INFO *Info ) {
+  UINT64 Pid;
+  UINT64 Cr3;
+  char ImagePath[260];
 
-  memoryClear( info, sizeof( *info ) );
-  if ( readVirtual64( smm.kernelCr3, eprocess + smm.pidOffset, &pid ) != EFI_SUCCESS ||
-       getProcessCr3( eprocess, &cr3 ) != EFI_SUCCESS ) {
+  MemoryClear( Info, sizeof( *Info ) );
+
+  if ( ReadVirtual64( Smm.KernelCr3, Eprocess + Smm.PidOffset, &Pid ) != EFI_SUCCESS ||
+       GetProcessCr3( Eprocess, &Cr3 ) != EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
-  info->Pid = ( UINT32 )pid;
-  info->Eprocess = eprocess;
-  info->Cr3 = cr3;
-  if ( smm.nameOffset != 0 ) {
-    copyVirtual(
-      smm.kernelCr3, eprocess + smm.nameOffset, info->Name, sizeof( info->Name ) - 1, 0 );
-    info->Name[sizeof( info->Name ) - 1] = 0;
+
+  Info->Pid = ( UINT32 )Pid;
+  Info->Eprocess = Eprocess;
+  Info->Cr3 = Cr3;
+
+  if ( Smm.NameOffset != 0 ) {
+    CopyVirtual(
+      Smm.KernelCr3, Eprocess + Smm.NameOffset, Info->Name, sizeof( Info->Name ) - 1, 0 );
+    Info->Name[sizeof( Info->Name ) - 1] = 0;
   }
-  findImageBase( eprocess, cr3, &info->ImageBase );
-  memoryClear( imagePath, sizeof( imagePath ) );
-  if ( readProcessImagePath( eprocess, cr3, imagePath, sizeof( imagePath ) ) == EFI_SUCCESS ) {
-    copyText( info->Name, sizeof( info->Name ), baseName( imagePath ) );
+
+  FindImageBase( Eprocess, Cr3, &Info->ImageBase );
+  MemoryClear( ImagePath, sizeof( ImagePath ) );
+
+  if ( ReadProcessImagePath( Eprocess, Cr3, ImagePath, sizeof( ImagePath ) ) == EFI_SUCCESS ) {
+    CopyText( Info->Name, sizeof( Info->Name ), BaseName( ImagePath ) );
   }
+
   return EFI_SUCCESS;
 }
 
-static BOOLEAN readProcessHint( const ProcessHint *hint, UINT32 pid, ProcessContext *process ) {
+static BOOLEAN ReadProcessHint( const ProcessHint *Hint, UINT32 Pid, ProcessContext *Process ) {
   struct {
-    UINT64 pid, next, previous;
-  } links;
-  UINT64 entry;
-  UINT64 neighbor;
+    UINT64 Pid, Next, Previous;
+  } Links;
+  UINT64 Entry;
+  UINT64 Neighbor;
 
-  if ( hint->pid != pid || !isKernelPointer( hint->eprocess ) ) {
+  if ( Hint->Pid != Pid || !IsKernelPointer( Hint->Eprocess ) ) {
     return 0;
   }
-  entry = hint->eprocess + smm.linksOffset;
-  if ( copyVirtual( smm.kernelCr3, hint->eprocess + smm.pidOffset, &links, sizeof( links ), 0 ) !=
+
+  Entry = Hint->Eprocess + Smm.LinksOffset;
+
+  if ( CopyVirtual( Smm.KernelCr3, Hint->Eprocess + Smm.PidOffset, &Links, sizeof( Links ), 0 ) !=
          EFI_SUCCESS ||
-       ( UINT32 )links.pid != pid || !isKernelPointer( links.next ) ||
-       !isKernelPointer( links.previous ) || links.next == entry || links.previous == entry ||
-       readVirtual64( smm.kernelCr3, links.next + 8, &neighbor ) != EFI_SUCCESS ||
-       neighbor != entry ||
-       readVirtual64( smm.kernelCr3, links.previous, &neighbor ) != EFI_SUCCESS ||
-       neighbor != entry || getProcessCr3( hint->eprocess, &process->cr3 ) != EFI_SUCCESS ) {
+       ( UINT32 )Links.Pid != Pid || !IsKernelPointer( Links.Next ) ||
+       !IsKernelPointer( Links.Previous ) || Links.Next == Entry || Links.Previous == Entry ||
+       ReadVirtual64( Smm.KernelCr3, Links.Next + 8, &Neighbor ) != EFI_SUCCESS ||
+       Neighbor != Entry ||
+       ReadVirtual64( Smm.KernelCr3, Links.Previous, &Neighbor ) != EFI_SUCCESS ||
+       Neighbor != Entry || GetProcessCr3( Hint->Eprocess, &Process->Cr3 ) != EFI_SUCCESS ) {
     return 0;
   }
 
-  process->eprocess = hint->eprocess;
+  Process->Eprocess = Hint->Eprocess;
   return 1;
 }
 
-EFI_STATUS resolveProcess( UINT32 pid, ProcessContext *process ) {
-  UINT64 head;
-  UINT64 link;
-  UINT32 guard;
+EFI_STATUS ResolveProcess( UINT32 Pid, ProcessContext *Process ) {
+  UINT64 Head;
+  UINT64 Link;
+  UINT32 Guard;
 
-  memoryClear( process, sizeof( *process ) );
-  if ( resolveProcessLayout() != EFI_SUCCESS ) {
+  MemoryClear( Process, sizeof( *Process ) );
+
+  if ( ResolveProcessLayout() != EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
-  if ( pid == 4 ) {
-    process->eprocess = smm.systemProcess;
-    return getProcessCr3( process->eprocess, &process->cr3 );
-  }
-  for ( UINT32 index = 0; index < PROCESS_HINT_COUNT; index++ ) {
-    ProcessHint *hint = &smm.processHints[index];
 
-    if ( hint->pid != pid ) {
+  if ( Pid == 4 ) {
+    Process->Eprocess = Smm.SystemProcess;
+    return GetProcessCr3( Process->Eprocess, &Process->Cr3 );
+  }
+
+  for ( UINT32 Index = 0; Index < PROCESS_HINT_COUNT; Index++ ) {
+    ProcessHint *Hint = &Smm.ProcessHints[Index];
+
+    if ( Hint->Pid != Pid ) {
       continue;
     }
-    if ( readProcessHint( hint, pid, process ) ) {
+
+    if ( ReadProcessHint( Hint, Pid, Process ) ) {
       return EFI_SUCCESS;
     }
 
-    memoryClear( hint, sizeof( *hint ) );
+    MemoryClear( Hint, sizeof( *Hint ) );
   }
-  head = smm.systemProcess + smm.linksOffset;
-  if ( readVirtual64( smm.kernelCr3, head, &link ) != EFI_SUCCESS ) {
+
+  Head = Smm.SystemProcess + Smm.LinksOffset;
+
+  if ( ReadVirtual64( Smm.KernelCr3, Head, &Link ) != EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
 
-  for ( guard = 0; guard < 4096 && isKernelPointer( link ) && link != head; guard++ ) {
+  for ( Guard = 0; Guard < 4096 && IsKernelPointer( Link ) && Link != Head; Guard++ ) {
     struct {
-      UINT64 pid, next;
-    } current;
-    UINT64 eprocess = link - smm.linksOffset;
+      UINT64 Pid, Next;
+    } Current;
+    UINT64 Eprocess = Link - Smm.LinksOffset;
 
-    if ( copyVirtual( smm.kernelCr3, eprocess + smm.pidOffset, &current, sizeof( current ), 0 ) !=
+    if ( CopyVirtual( Smm.KernelCr3, Eprocess + Smm.PidOffset, &Current, sizeof( Current ), 0 ) !=
          EFI_SUCCESS ) {
       break;
     }
-    if ( ( UINT32 )current.pid == pid ) {
-      EFI_STATUS status = getProcessCr3( eprocess, &process->cr3 );
 
-      if ( status == EFI_SUCCESS ) {
-        UINT32 index = smm.nextProcessHint % PROCESS_HINT_COUNT;
-        ProcessHint *hint = &smm.processHints[index];
+    if ( ( UINT32 )Current.Pid == Pid ) {
+      EFI_STATUS Status = GetProcessCr3( Eprocess, &Process->Cr3 );
 
-        process->eprocess = eprocess;
-        hint->pid = pid;
-        hint->eprocess = eprocess;
-        smm.nextProcessHint = ( index + 1 ) % PROCESS_HINT_COUNT;
+      if ( Status == EFI_SUCCESS ) {
+        UINT32 Index = Smm.NextProcessHint % PROCESS_HINT_COUNT;
+        ProcessHint *Hint = &Smm.ProcessHints[Index];
+
+        Process->Eprocess = Eprocess;
+        Hint->Pid = Pid;
+        Hint->Eprocess = Eprocess;
+        Smm.NextProcessHint = ( Index + 1 ) % PROCESS_HINT_COUNT;
       }
-      return status;
+
+      return Status;
     }
-    link = current.next;
+
+    Link = Current.Next;
   }
 
   return EFI_NOT_FOUND;
 }
 
-EFI_STATUS findProcessPid( UINT32 pid, PROCESS_INFO *info ) {
-  ProcessContext process;
-  EFI_STATUS status = resolveProcess( pid, &process );
+EFI_STATUS FindProcessPid( UINT32 Pid, PROCESS_INFO *Info ) {
+  ProcessContext Process;
+  EFI_STATUS Status = ResolveProcess( Pid, &Process );
 
-  if ( EFI_ERROR( status ) ) {
-    return status;
+  if ( EFI_ERROR( Status ) ) {
+    return Status;
   }
-  return fillProcessInfo( process.eprocess, info );
+
+  return FillProcessInfo( Process.Eprocess, Info );
 }
 
-EFI_STATUS findProcessName( const char *name, PROCESS_INFO *info ) {
-  UINT64 head;
-  UINT64 link;
-  UINT32 guard;
-  char currentName[NAME_SIZE];
-  char imagePath[260];
-  UINT64 cr3;
+EFI_STATUS FindProcessName( const char *Name, PROCESS_INFO *Info ) {
+  UINT64 Head;
+  UINT64 Link;
+  UINT32 Guard;
+  char CurrentName[NAME_SIZE];
+  char ImagePath[260];
+  UINT64 Cr3;
 
-  if ( resolveProcessLayout() != EFI_SUCCESS || smm.nameOffset == 0 ) {
+  if ( ResolveProcessLayout() != EFI_SUCCESS || Smm.NameOffset == 0 ) {
     return EFI_NOT_FOUND;
   }
-  memoryClear( currentName, sizeof( currentName ) );
-  copyVirtual(
-    smm.kernelCr3, smm.systemProcess + smm.nameOffset, currentName, sizeof( currentName ) - 1, 0 );
-  if ( sameName( currentName, name ) ) {
-    return fillProcessInfo( smm.systemProcess, info );
+
+  MemoryClear( CurrentName, sizeof( CurrentName ) );
+  CopyVirtual(
+    Smm.KernelCr3, Smm.SystemProcess + Smm.NameOffset, CurrentName, sizeof( CurrentName ) - 1, 0 );
+
+  if ( SameName( CurrentName, Name ) ) {
+    return FillProcessInfo( Smm.SystemProcess, Info );
   }
-  head = smm.systemProcess + smm.linksOffset;
-  if ( readVirtual64( smm.kernelCr3, head, &link ) != EFI_SUCCESS ) {
+
+  Head = Smm.SystemProcess + Smm.LinksOffset;
+
+  if ( ReadVirtual64( Smm.KernelCr3, Head, &Link ) != EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
-  for ( guard = 0; guard < 4096 && isKernelPointer( link ) && link != head; guard++ ) {
-    UINT64 eprocess = link - smm.linksOffset;
-    memoryClear( currentName, sizeof( currentName ) );
-    copyVirtual(
-      smm.kernelCr3, eprocess + smm.nameOffset, currentName, sizeof( currentName ) - 1, 0 );
-    if ( sameName( currentName, name ) ) {
-      return fillProcessInfo( eprocess, info );
+
+  for ( Guard = 0; Guard < 4096 && IsKernelPointer( Link ) && Link != Head; Guard++ ) {
+    UINT64 Eprocess = Link - Smm.LinksOffset;
+
+    MemoryClear( CurrentName, sizeof( CurrentName ) );
+    CopyVirtual(
+      Smm.KernelCr3, Eprocess + Smm.NameOffset, CurrentName, sizeof( CurrentName ) - 1, 0 );
+
+    if ( SameName( CurrentName, Name ) ) {
+      return FillProcessInfo( Eprocess, Info );
     }
-    if ( getProcessCr3( eprocess, &cr3 ) == EFI_SUCCESS ) {
-      memoryClear( imagePath, sizeof( imagePath ) );
-      if ( readProcessImagePath( eprocess, cr3, imagePath, sizeof( imagePath ) ) == EFI_SUCCESS &&
-           sameBaseName( imagePath, name ) ) {
-        return fillProcessInfo( eprocess, info );
+
+    if ( GetProcessCr3( Eprocess, &Cr3 ) == EFI_SUCCESS ) {
+      MemoryClear( ImagePath, sizeof( ImagePath ) );
+
+      if ( ReadProcessImagePath( Eprocess, Cr3, ImagePath, sizeof( ImagePath ) ) == EFI_SUCCESS &&
+           SameBaseName( ImagePath, Name ) ) {
+        return FillProcessInfo( Eprocess, Info );
       }
     }
-    if ( readVirtual64( smm.kernelCr3, eprocess + smm.linksOffset, &link ) != EFI_SUCCESS ) {
+
+    if ( ReadVirtual64( Smm.KernelCr3, Eprocess + Smm.LinksOffset, &Link ) != EFI_SUCCESS ) {
       break;
     }
   }
+
   return EFI_NOT_FOUND;
 }

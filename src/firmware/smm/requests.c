@@ -1,169 +1,201 @@
 #include "internal.h"
 
-VOID reply( RESPONSE *response,
-  REQUEST *request,
-  EFI_STATUS status,
-  UINT64 result,
-  const VOID *data,
-  UINT32 dataSize ) {
-  UINT32 statusCode;
+VOID Reply( RESPONSE *Response,
+  REQUEST *Request,
+  EFI_STATUS Status,
+  UINT64 Result,
+  const VOID *Data,
+  UINT32 DataSize ) {
+  UINT32 StatusCode;
 
-  memoryClear( response, sizeof( *response ) );
-  response->Magic = RESP_MAGIC;
-  statusCode = ( UINT32 )status;
-  response->Status = EFI_ERROR( status ) ? ( statusCode != 0 ? statusCode : 1U ) : 0;
-  response->Command = request->Command;
-  response->Sequence = request->Sequence;
-  response->Result = result;
-  if ( dataSize > RESPONSE_DATA_SIZE ) {
-    dataSize = RESPONSE_DATA_SIZE;
+  MemoryClear( Response, sizeof( *Response ) );
+  Response->Magic = RESP_MAGIC;
+  StatusCode = ( UINT32 )Status;
+  Response->Status = EFI_ERROR( Status ) ? ( StatusCode != 0 ? StatusCode : 1U ) : 0;
+  Response->Command = Request->Command;
+  Response->Sequence = Request->Sequence;
+  Response->Result = Result;
+
+  if ( DataSize > RESPONSE_DATA_SIZE ) {
+    DataSize = RESPONSE_DATA_SIZE;
   }
-  response->DataSize = dataSize;
-  if ( data != 0 && dataSize != 0 ) {
-    memoryCopy( response->Data, data, dataSize );
+
+  Response->DataSize = DataSize;
+
+  if ( Data != 0 && DataSize != 0 ) {
+    MemoryCopy( Response->Data, Data, DataSize );
   }
 }
 
-EFI_STATUS handleRequest( REQUEST *request, RESPONSE *response ) {
-  PROCESS_INFO process;
-  ProcessContext context;
-  MODULE_INFO module;
-  EFI_STATUS status;
-  UINT32 size;
-  UINT64 pa = 0;
-  UINT64 address = 0;
-  UINT8 scratch[RESPONSE_DATA_SIZE];
+EFI_STATUS HandleRequest( REQUEST *Request, RESPONSE *Response ) {
+  PROCESS_INFO Process;
+  ProcessContext Context;
+  MODULE_INFO Module;
+  EFI_STATUS Status;
+  UINT32 Size;
+  UINT64 Pa = 0;
+  UINT64 Address = 0;
+  UINT8 Scratch[RESPONSE_DATA_SIZE];
 
-  memoryClear( &process, sizeof( process ) );
-  memoryClear( &module, sizeof( module ) );
-  memoryClear( scratch, sizeof( scratch ) );
-  if ( request->Magic != REQ_MAGIC ) {
+  MemoryClear( &Process, sizeof( Process ) );
+  MemoryClear( &Module, sizeof( Module ) );
+  MemoryClear( Scratch, sizeof( Scratch ) );
+
+  if ( Request->Magic != REQ_MAGIC ) {
     return EFI_NOT_FOUND;
   }
-  size = ( UINT32 )request->Arg3;
-  if ( request->Command == PING ) {
-    reply( response,
-      request,
+
+  Size = ( UINT32 )Request->Arg3;
+
+  if ( Request->Command == PING ) {
+    Reply( Response,
+      Request,
       EFI_SUCCESS,
-      ( smm.features & FEATURE_BUFFER_TRANSFER ) ? FAST_CAPABILITY : 0,
+      ( Smm.Features & FEATURE_BUFFER_TRANSFER ) ? FAST_CAPABILITY : 0,
       0,
       0 );
     return EFI_SUCCESS;
   }
-  if ( request->Command >= READ_VIRT_BUFFER && request->Command <= WRITE_PHYS_BUFFER ) {
-    UINT64 transferred = 0;
 
-    status = transferBuffer( request, &transferred );
-    reply( response, request, status, transferred, 0, 0 );
-    return status;
+  if ( Request->Command >= READ_VIRT_BUFFER && Request->Command <= WRITE_PHYS_BUFFER ) {
+    UINT64 Transferred = 0;
+
+    Status = TransferBuffer( Request, &Transferred );
+    Reply( Response, Request, Status, Transferred, 0, 0 );
+    return Status;
   }
-  if ( request->Command == READ_PHYS ) {
-    size = ( UINT32 )request->Arg2;
-    if ( size > RESPONSE_DATA_SIZE ) {
-      reply( response, request, EFI_INVALID_PARAMETER, 0, 0, 0 );
+
+  if ( Request->Command == READ_PHYS ) {
+    Size = ( UINT32 )Request->Arg2;
+
+    if ( Size > RESPONSE_DATA_SIZE ) {
+      Reply( Response, Request, EFI_INVALID_PARAMETER, 0, 0, 0 );
       return EFI_INVALID_PARAMETER;
     }
-    status = copyPhysical( request->Arg1, scratch, size, 0 );
-    reply( response, request, status, request->Arg1, scratch, EFI_ERROR( status ) ? 0 : size );
-    return status;
+
+    Status = CopyPhysical( Request->Arg1, Scratch, Size, 0 );
+    Reply( Response, Request, Status, Request->Arg1, Scratch, EFI_ERROR( Status ) ? 0 : Size );
+    return Status;
   }
-  if ( request->Command == WRITE_PHYS ) {
-    status = request->DataSize <= RESPONSE_DATA_SIZE
-               ? copyPhysical( request->Arg1, request->Data, request->DataSize, 1 )
+
+  if ( Request->Command == WRITE_PHYS ) {
+    Status = Request->DataSize <= RESPONSE_DATA_SIZE
+               ? CopyPhysical( Request->Arg1, Request->Data, Request->DataSize, 1 )
                : EFI_INVALID_PARAMETER;
-    reply( response, request, status, request->Arg1, 0, 0 );
-    return status;
+    Reply( Response, Request, Status, Request->Arg1, 0, 0 );
+    return Status;
   }
-  if ( request->Command == FIND_PROCESS_PID ) {
-    status = findProcessPid( ( UINT32 )request->Arg1, &process );
-    reply( response,
-      request,
-      status,
-      process.Eprocess,
-      &process,
-      EFI_ERROR( status ) ? 0 : sizeof( process ) );
-    return status;
+
+  if ( Request->Command == FIND_PROCESS_PID ) {
+    Status = FindProcessPid( ( UINT32 )Request->Arg1, &Process );
+    Reply( Response,
+      Request,
+      Status,
+      Process.Eprocess,
+      &Process,
+      EFI_ERROR( Status ) ? 0 : sizeof( Process ) );
+
+    return Status;
   }
-  if ( request->Command == FIND_PROCESS_NAME ) {
-    status = findProcessName( ( char * )request->Data, &process );
-    reply( response,
-      request,
-      status,
-      process.Eprocess,
-      &process,
-      EFI_ERROR( status ) ? 0 : sizeof( process ) );
-    return status;
+
+  if ( Request->Command == FIND_PROCESS_NAME ) {
+    Status = FindProcessName( ( char * )Request->Data, &Process );
+    Reply( Response,
+      Request,
+      Status,
+      Process.Eprocess,
+      &Process,
+      EFI_ERROR( Status ) ? 0 : sizeof( Process ) );
+
+    return Status;
   }
-  if ( request->Command == TRANSLATE_VIRT ) {
-    status = resolveProcess( ( UINT32 )request->Arg1, &context );
-    if ( !EFI_ERROR( status ) ) {
-      status = translateVirtual( context.cr3, request->Arg2, &pa );
+
+  if ( Request->Command == TRANSLATE_VIRT ) {
+    Status = ResolveProcess( ( UINT32 )Request->Arg1, &Context );
+
+    if ( !EFI_ERROR( Status ) ) {
+      Status = TranslateVirtual( Context.Cr3, Request->Arg2, &Pa );
     }
-    reply( response, request, status, EFI_ERROR( status ) ? 0 : pa, 0, 0 );
-    return status;
+
+    Reply( Response, Request, Status, EFI_ERROR( Status ) ? 0 : Pa, 0, 0 );
+    return Status;
   }
-  if ( request->Command == READ_VIRT ) {
-    if ( size > RESPONSE_DATA_SIZE ) {
-      reply( response, request, EFI_INVALID_PARAMETER, 0, 0, 0 );
+
+  if ( Request->Command == READ_VIRT ) {
+    if ( Size > RESPONSE_DATA_SIZE ) {
+      Reply( Response, Request, EFI_INVALID_PARAMETER, 0, 0, 0 );
       return EFI_INVALID_PARAMETER;
     }
-    status = resolveProcess( ( UINT32 )request->Arg1, &context );
-    if ( !EFI_ERROR( status ) ) {
-      status = copyVirtual( context.cr3, request->Arg2, scratch, size, 0 );
+
+    Status = ResolveProcess( ( UINT32 )Request->Arg1, &Context );
+
+    if ( !EFI_ERROR( Status ) ) {
+      Status = CopyVirtual( Context.Cr3, Request->Arg2, Scratch, Size, 0 );
     }
-    reply( response, request, status, request->Arg2, scratch, EFI_ERROR( status ) ? 0 : size );
-    return status;
+
+    Reply( Response, Request, Status, Request->Arg2, Scratch, EFI_ERROR( Status ) ? 0 : Size );
+    return Status;
   }
-  if ( request->Command == WRITE_VIRT ) {
-    if ( request->DataSize > RESPONSE_DATA_SIZE ) {
-      reply( response, request, EFI_INVALID_PARAMETER, 0, 0, 0 );
+
+  if ( Request->Command == WRITE_VIRT ) {
+    if ( Request->DataSize > RESPONSE_DATA_SIZE ) {
+      Reply( Response, Request, EFI_INVALID_PARAMETER, 0, 0, 0 );
       return EFI_INVALID_PARAMETER;
     }
-    status = resolveProcess( ( UINT32 )request->Arg1, &context );
-    if ( !EFI_ERROR( status ) ) {
-      status = copyVirtual( context.cr3, request->Arg2, request->Data, request->DataSize, 1 );
+
+    Status = ResolveProcess( ( UINT32 )Request->Arg1, &Context );
+
+    if ( !EFI_ERROR( Status ) ) {
+      Status = CopyVirtual( Context.Cr3, Request->Arg2, Request->Data, Request->DataSize, 1 );
     }
-    reply( response, request, status, request->Arg2, 0, 0 );
-    return status;
+
+    Reply( Response, Request, Status, Request->Arg2, 0, 0 );
+    return Status;
   }
-  if ( request->Command == FIND_MODULE ) {
-    status = findUserModule( ( UINT32 )request->Arg1, ( char * )request->Data, &module );
-    reply(
-      response, request, status, module.Base, &module, EFI_ERROR( status ) ? 0 : sizeof( module ) );
-    return status;
+
+  if ( Request->Command == FIND_MODULE ) {
+    Status = FindUserModule( ( UINT32 )Request->Arg1, ( char * )Request->Data, &Module );
+    Reply(
+      Response, Request, Status, Module.Base, &Module, EFI_ERROR( Status ) ? 0 : sizeof( Module ) );
+    return Status;
   }
-  if ( request->Command == FIND_KERNEL_MODULE ) {
-    status = findKernelModule( ( char * )request->Data, &module );
-    reply(
-      response, request, status, module.Base, &module, EFI_ERROR( status ) ? 0 : sizeof( module ) );
-    return status;
+
+  if ( Request->Command == FIND_KERNEL_MODULE ) {
+    Status = ResolveKernelModule( ( char * )Request->Data, &Module );
+    Reply(
+      Response, Request, Status, Module.Base, &Module, EFI_ERROR( Status ) ? 0 : sizeof( Module ) );
+    return Status;
   }
-  if ( request->Command == FIND_EXPORT ) {
-    if ( request->DataSize <= sizeof( MODULE_INFO ) ) {
-      reply( response, request, EFI_INVALID_PARAMETER, 0, 0, 0 );
+
+  if ( Request->Command == FIND_EXPORT ) {
+    if ( Request->DataSize <= sizeof( MODULE_INFO ) ) {
+      Reply( Response, Request, EFI_INVALID_PARAMETER, 0, 0, 0 );
       return EFI_INVALID_PARAMETER;
     }
-    memoryCopy( &module, request->Data, sizeof( module ) );
-    address = 0;
-    status = resolveExport( module.Cr3 != 0 ? module.Cr3 : smm.kernelCr3,
-      module.Base,
-      ( char * )( request->Data + sizeof( module ) ),
-      &address );
-    reply( response, request, status, address, 0, 0 );
-    return status;
+
+    MemoryCopy( &Module, Request->Data, sizeof( Module ) );
+    Address = 0;
+    Status = ResolveExport( Module.Cr3 != 0 ? Module.Cr3 : Smm.KernelCr3,
+      Module.Base,
+      ( char * )( Request->Data + sizeof( Module ) ),
+      &Address );
+    Reply( Response, Request, Status, Address, 0, 0 );
+    return Status;
   }
-  reply( response, request, EFI_UNSUPPORTED, 0, 0, 0 );
+
+  Reply( Response, Request, EFI_UNSUPPORTED, 0, 0, 0 );
   return EFI_UNSUPPORTED;
 }
 
-EFI_STATUS processRequest( VOID ) {
-  REQUEST *request;
-  RESPONSE *response;
+EFI_STATUS ProcessRequest( VOID ) {
+  REQUEST *Request;
+  RESPONSE *Response;
 
-  if ( smm.mailboxPhysical == 0 || smm.mailboxSize < MAILBOX_SIZE ) {
+  if ( Smm.MailboxPhysical == 0 || Smm.MailboxSize < MAILBOX_SIZE ) {
     return EFI_NOT_FOUND;
   }
-  request = ( REQUEST * )( UINTN )smm.mailboxPhysical;
-  response = ( RESPONSE * )( UINTN )( smm.mailboxPhysical + RESPONSE_OFFSET );
-  return handleRequest( request, response );
+
+  Request = ( REQUEST * )( UINTN )Smm.MailboxPhysical;
+  Response = ( RESPONSE * )( UINTN )( Smm.MailboxPhysical + RESPONSE_OFFSET );
+  return HandleRequest( Request, Response );
 }

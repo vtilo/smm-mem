@@ -1,202 +1,236 @@
 #include "internal.h"
 
-EFI_STATUS EFIAPI swSmiHandler(
-  EFI_HANDLE dispatchHandle, const VOID *context, VOID *commBuffer, UINTN *commBufferSize ) {
-  ( void )dispatchHandle;
-  ( void )context;
-  ( void )commBuffer;
-  ( void )commBufferSize;
-  ( void )processRequest();
+EFI_STATUS EFIAPI SwSmiHandler(
+  EFI_HANDLE DispatchHandle, const VOID *Context, VOID *CommBuffer, UINTN *CommBufferSize ) {
+  ( void )DispatchHandle;
+  ( void )Context;
+  ( void )CommBuffer;
+  ( void )CommBufferSize;
+  ( void )ProcessRequest();
   return EFI_SUCCESS;
 }
 
-EFI_STATUS registerSwSmi( VOID ) {
-  EFI_SMM_SW_DISPATCH2_PROTOCOL *swDispatch = 0;
-  EFI_SMM_SW_REGISTER_CONTEXT swContext;
-  EFI_LOCATE_PROTOCOL locate;
-  EFI_STATUS status;
+EFI_STATUS RegisterSwSmi( VOID ) {
+  EFI_SMM_SW_DISPATCH2_PROTOCOL *SwDispatch = 0;
+  EFI_SMM_SW_REGISTER_CONTEXT SwContext;
+  EFI_LOCATE_PROTOCOL Locate;
+  EFI_STATUS Status;
 
-  if ( smm.swHandle != 0 ) {
-    logText( "smm sw smi already registered\n" );
+  if ( Smm.SwHandle != 0 ) {
+    LogText( "smm sw smi already registered\n" );
     return EFI_SUCCESS;
   }
-  locate = ( EFI_LOCATE_PROTOCOL )smm.table->SmmLocateProtocol;
-  status = locate( &smmSwDispatchGuid, 0, ( VOID ** )&swDispatch );
-  if ( EFI_ERROR( status ) || swDispatch == 0 || swDispatch->Register == 0 ) {
-    logStatus( "smm sw dispatch unavailable ", EFI_ERROR( status ) ? status : EFI_NOT_FOUND );
-    return EFI_ERROR( status ) ? status : EFI_NOT_FOUND;
+
+  Locate = ( EFI_LOCATE_PROTOCOL )Smm.Table->SmmLocateProtocol;
+  Status = Locate( &SmmSwDispatchGuid, 0, ( VOID ** )&SwDispatch );
+
+  if ( EFI_ERROR( Status ) || SwDispatch == 0 || SwDispatch->Register == 0 ) {
+    LogStatus( "smm sw dispatch unavailable ", EFI_ERROR( Status ) ? Status : EFI_NOT_FOUND );
+    return EFI_ERROR( Status ) ? Status : EFI_NOT_FOUND;
   }
-  if ( ( UINTN )smm.swSmiValue > swDispatch->MaximumSwiValue ) {
-    logText( "smm sw value out of range max=0x" );
-    logHex( swDispatch->MaximumSwiValue );
-    logText( " requested=0x" );
-    logHex( smm.swSmiValue );
-    logText( "\n" );
+
+  if ( ( UINTN )Smm.SwSmiValue > SwDispatch->MaximumSwiValue ) {
+    LogText( "smm sw value out of range max=0x" );
+    LogHex( SwDispatch->MaximumSwiValue );
+    LogText( " requested=0x" );
+    LogHex( Smm.SwSmiValue );
+    LogText( "\n" );
     return EFI_INVALID_PARAMETER;
   }
-  swContext.SwSmiInputValue = smm.swSmiValue;
-  status = swDispatch->Register( swDispatch, swSmiHandler, &swContext, &smm.swHandle );
-  if ( EFI_ERROR( status ) ) {
-    logStatus( "smm sw smi register failed ", status );
+
+  SwContext.SwSmiInputValue = Smm.SwSmiValue;
+  Status = SwDispatch->Register( SwDispatch, SwSmiHandler, &SwContext, &Smm.SwHandle );
+
+  if ( EFI_ERROR( Status ) ) {
+    LogStatus( "smm sw smi register failed ", Status );
   } else {
-    logText( "smm sw smi registered value=0x" );
-    logHex( smm.swSmiValue );
-    logText( "\n" );
+    LogText( "smm sw smi registered value=0x" );
+    LogHex( Smm.SwSmiValue );
+    LogText( "\n" );
   }
-  return status;
+
+  return Status;
 }
 
-EFI_STATUS validateSmst( VOID ) {
-  if ( smm.table == 0 ) {
-    logText( "smm smst missing\n" );
+EFI_STATUS ValidateSmst( VOID ) {
+  if ( Smm.Table == 0 ) {
+    LogText( "smm smst missing\n" );
     return EFI_NOT_FOUND;
   }
-  if ( smm.table->SmmLocateProtocol == 0 ) {
-    logText( "smm locate protocol missing\n" );
+
+  if ( Smm.Table->SmmLocateProtocol == 0 ) {
+    LogText( "smm locate protocol missing\n" );
     return EFI_NOT_FOUND;
   }
-  if ( smm.table->SmmIo.Mem.Read == 0 ) {
-    logText( "smm mem read missing\n" );
+
+  if ( Smm.Table->SmmIo.Mem.Read == 0 ) {
+    LogText( "smm mem read missing\n" );
     return EFI_NOT_FOUND;
   }
-  if ( smm.table->SmmIo.Mem.Write == 0 ) {
-    logText( "smm mem write missing\n" );
+
+  if ( Smm.Table->SmmIo.Mem.Write == 0 ) {
+    LogText( "smm mem write missing\n" );
     return EFI_NOT_FOUND;
   }
+
   return EFI_SUCCESS;
 }
 
-EFI_STATUS initSmm( VOID ) {
-  EFI_SMM_BASE2_PROTOCOL *smmBase = 0;
-  EFI_STATUS status;
+EFI_STATUS InitSmm( VOID ) {
+  EFI_SMM_BASE2_PROTOCOL *SmmBase = 0;
+  EFI_STATUS Status;
 
-  if ( smm.systemTable == 0 || smm.systemTable->BootServices == 0 ) {
-    logText( "smm system table invalid\n" );
+  if ( Smm.SystemTable == 0 || Smm.SystemTable->BootServices == 0 ) {
+    LogText( "smm system table invalid\n" );
     return EFI_INVALID_PARAMETER;
   }
-  status = smm.systemTable->BootServices->LocateProtocol( &smmBase2Guid, 0, ( VOID ** )&smmBase );
-  if ( EFI_ERROR( status ) || smmBase == 0 ) {
-    logStatus( "smm base2 unavailable ", EFI_ERROR( status ) ? status : EFI_NOT_FOUND );
-    return EFI_ERROR( status ) ? status : EFI_NOT_FOUND;
+
+  Status = Smm.SystemTable->BootServices->LocateProtocol( &SmmBase2Guid, 0, ( VOID ** )&SmmBase );
+
+  if ( EFI_ERROR( Status ) || SmmBase == 0 ) {
+    LogStatus( "smm base2 unavailable ", EFI_ERROR( Status ) ? Status : EFI_NOT_FOUND );
+    return EFI_ERROR( Status ) ? Status : EFI_NOT_FOUND;
   }
-  status = smmBase->GetSmstLocation( smmBase, &smm.table );
-  if ( EFI_ERROR( status ) ) {
-    logStatus( "smm get smst failed ", status );
-    return status;
+
+  Status = SmmBase->GetSmstLocation( SmmBase, &Smm.Table );
+
+  if ( EFI_ERROR( Status ) ) {
+    LogStatus( "smm get smst failed ", Status );
+    return Status;
   }
-  status = validateSmst();
-  if ( EFI_ERROR( status ) ) {
-    return status;
+
+  Status = ValidateSmst();
+
+  if ( EFI_ERROR( Status ) ) {
+    return Status;
   }
-  logText( "smm smst ok cpus=0x" );
-  logHex( smm.table->NumberOfCpus );
-  logText( "\n" );
+
+  LogText( "smm smst ok cpus=0x" );
+  LogHex( Smm.Table->NumberOfCpus );
+  LogText( "\n" );
   return EFI_SUCCESS;
 }
 
-EFI_STATUS applyConfig( CONFIG *config, const char *source ) {
-  EFI_STATUS status;
+EFI_STATUS ApplyConfig( CONFIG *Config, const char *Source ) {
+  EFI_STATUS Status;
 
-  if ( config == 0 || config->Magic != CONFIG_MAGIC || config->MailboxPhysical == 0 ||
-       config->MailboxSize < MAILBOX_SIZE ) {
-    logText( "smm config rejected from " );
-    logText( source );
-    if ( config != 0 ) {
-      logText( " magic=0x" );
-      logHex( config->Magic );
-      logText( " mailbox=0x" );
-      logHex( config->MailboxPhysical );
-      logText( " size=0x" );
-      logHex( config->MailboxSize );
+  if ( Config == 0 || Config->Magic != CONFIG_MAGIC || Config->MailboxPhysical == 0 ||
+       Config->MailboxSize < MAILBOX_SIZE ) {
+    LogText( "smm config rejected from " );
+    LogText( Source );
+
+    if ( Config != 0 ) {
+      LogText( " magic=0x" );
+      LogHex( Config->Magic );
+      LogText( " mailbox=0x" );
+      LogHex( Config->MailboxPhysical );
+      LogText( " size=0x" );
+      LogHex( Config->MailboxSize );
     }
-    logText( "\n" );
+
+    LogText( "\n" );
     return EFI_INVALID_PARAMETER;
   }
-  smm.mailboxPhysical = config->MailboxPhysical;
-  smm.mailboxSize = config->MailboxSize;
-  if ( config->SwSmiValue != 0 ) {
-    smm.swSmiValue = config->SwSmiValue;
+
+  Smm.MailboxPhysical = Config->MailboxPhysical;
+  Smm.MailboxSize = Config->MailboxSize;
+
+  if ( Config->SwSmiValue != 0 ) {
+    Smm.SwSmiValue = Config->SwSmiValue;
   }
-  logText( "smm config from " );
-  logText( source );
-  logText( " mailbox=0x" );
-  logHex( smm.mailboxPhysical );
-  logText( " size=0x" );
-  logHex( smm.mailboxSize );
-  logText( " sw=0x" );
-  logHex( smm.swSmiValue );
-  logText( "\n" );
-  status = registerSwSmi();
-  return status;
+
+  LogText( "smm config from " );
+  LogText( Source );
+  LogText( " mailbox=0x" );
+  LogHex( Smm.MailboxPhysical );
+  LogText( " size=0x" );
+  LogHex( Smm.MailboxSize );
+  LogText( " sw=0x" );
+  LogHex( Smm.SwSmiValue );
+  LogText( "\n" );
+  Status = RegisterSwSmi();
+  return Status;
 }
 
-EFI_STATUS EFIAPI configCommHandler(
-  EFI_HANDLE dispatchHandle, const VOID *context, VOID *commBuffer, UINTN *commBufferSize ) {
-  CONFIG *config;
+EFI_STATUS EFIAPI ConfigCommHandler(
+  EFI_HANDLE DispatchHandle, const VOID *Context, VOID *CommBuffer, UINTN *CommBufferSize ) {
+  CONFIG *Config;
 
-  ( void )dispatchHandle;
-  ( void )context;
-  logText( "smm config comm received\n" );
-  if ( commBuffer == 0 || commBufferSize == 0 || *commBufferSize < sizeof( CONFIG ) ) {
-    logText( "smm config comm invalid buffer\n" );
+  ( void )DispatchHandle;
+  ( void )Context;
+  LogText( "smm config comm received\n" );
+
+  if ( CommBuffer == 0 || CommBufferSize == 0 || *CommBufferSize < sizeof( CONFIG ) ) {
+    LogText( "smm config comm invalid buffer\n" );
     return EFI_SUCCESS;
   }
-  config = ( CONFIG * )commBuffer;
-  smm.features = 0;
-  config->Status = applyConfig( config, "comm" );
-  if ( !EFI_ERROR( config->Status ) && *commBufferSize >= sizeof( CONFIG_EXTENDED ) ) {
-    CONFIG_EXTENDED *extended = ( CONFIG_EXTENDED * )commBuffer;
 
-    if ( extended->ExtensionMagic == FAST_CONFIG_MAGIC && extended->Reserved == 0 ) {
-      smm.features = extended->Features & FEATURE_BUFFER_TRANSFER;
+  Config = ( CONFIG * )CommBuffer;
+  Smm.Features = 0;
+  Config->Status = ApplyConfig( Config, "comm" );
+
+  if ( !EFI_ERROR( Config->Status ) && *CommBufferSize >= sizeof( CONFIG_EXTENDED ) ) {
+    CONFIG_EXTENDED *Extended = ( CONFIG_EXTENDED * )CommBuffer;
+
+    if ( Extended->ExtensionMagic == FAST_CONFIG_MAGIC && Extended->Reserved == 0 ) {
+      Smm.Features = Extended->Features & FEATURE_BUFFER_TRANSFER;
     }
   }
-  logText( "smm transport features=0x" );
-  logHex( smm.features );
-  logText( " bytes=0x" );
-  logHex( *commBufferSize );
-  logText( "\n" );
+
+  LogText( "smm transport features=0x" );
+  LogHex( Smm.Features );
+  LogText( " bytes=0x" );
+  LogHex( *CommBufferSize );
+  LogText( "\n" );
   return EFI_SUCCESS;
 }
 
-EFI_STATUS registerConfigComm( VOID ) {
-  EFI_STATUS status;
+EFI_STATUS RegisterConfigComm( VOID ) {
+  EFI_STATUS Status;
 
-  if ( smm.commHandle != 0 ) {
-    logText( "smm config comm already registered\n" );
+  if ( Smm.CommHandle != 0 ) {
+    LogText( "smm config comm already registered\n" );
     return EFI_SUCCESS;
   }
-  if ( smm.table->SmiHandlerRegister == 0 ) {
-    logText( "smm config comm register unavailable\n" );
+
+  if ( Smm.Table->SmiHandlerRegister == 0 ) {
+    LogText( "smm config comm register unavailable\n" );
     return EFI_NOT_FOUND;
   }
-  status = smm.table->SmiHandlerRegister( configCommHandler, &configCommGuid, &smm.commHandle );
-  if ( EFI_ERROR( status ) ) {
-    logStatus( "smm config comm register failed ", status );
+
+  Status = Smm.Table->SmiHandlerRegister( ConfigCommHandler, &ConfigCommGuid, &Smm.CommHandle );
+
+  if ( EFI_ERROR( Status ) ) {
+    LogStatus( "smm config comm register failed ", Status );
   } else {
-    logText( "smm config comm registered\n" );
+    LogText( "smm config comm registered\n" );
   }
-  return status;
+
+  return Status;
 }
 
-EFI_STATUS configureFromPublishedTable( VOID ) {
-  CONFIG *config = 0;
-  UINTN index;
+EFI_STATUS ConfigureFromPublishedTable( VOID ) {
+  CONFIG *Config = 0;
+  UINTN Index;
 
-  if ( smm.systemTable == 0 || smm.systemTable->ConfigurationTable == 0 ) {
-    logText( "smm published config table unavailable\n" );
+  if ( Smm.SystemTable == 0 || Smm.SystemTable->ConfigurationTable == 0 ) {
+    LogText( "smm published config table unavailable\n" );
     return EFI_NOT_FOUND;
   }
-  for ( index = 0; index < smm.systemTable->NumberOfTableEntries; index++ ) {
-    EFI_CONFIGURATION_TABLE *table = &smm.systemTable->ConfigurationTable[index];
-    if ( guidEqual( &table->VendorGuid, &configGuid ) ) {
-      config = ( CONFIG * )table->VendorTable;
+
+  for ( Index = 0; Index < Smm.SystemTable->NumberOfTableEntries; Index++ ) {
+    EFI_CONFIGURATION_TABLE *Table = &Smm.SystemTable->ConfigurationTable[Index];
+
+    if ( GuidEqual( &Table->VendorGuid, &ConfigGuid ) ) {
+      Config = ( CONFIG * )Table->VendorTable;
       break;
     }
   }
-  if ( config == 0 ) {
-    logText( "smm published config missing\n" );
+
+  if ( Config == 0 ) {
+    LogText( "smm published config missing\n" );
     return EFI_NOT_FOUND;
   }
-  return applyConfig( config, "published" );
+
+  return ApplyConfig( Config, "published" );
 }

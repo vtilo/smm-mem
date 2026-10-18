@@ -1,27 +1,31 @@
 #include "internal.h"
 
-SmmState smm = { 0 };
+SmmState Smm = { 0 };
 
-EFI_STATUS EFIAPI SmmEntry( EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE *systemTable ) {
-  EFI_STATUS status;
-  ( void )imageHandle;
+EFI_STATUS EFIAPI SmmEntry( EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable ) {
+  EFI_STATUS Status;
 
-  memoryClear( &smm, sizeof( smm ) );
-  smm.systemTable = systemTable;
-  smm.swSmiValue = SW_SMI_VALUE;
-  serialInit();
-  logText( "mem smm init\n" );
-  status = initSmm();
-  if ( !EFI_ERROR( status ) ) {
-    status = registerConfigComm();
-    ( void )status;
-    status = configureFromPublishedTable();
-    if ( EFI_ERROR( status ) ) {
-      logStatus( "smm published config failed ", status );
+  ( void )ImageHandle;
+
+  MemoryClear( &Smm, sizeof( Smm ) );
+  Smm.SystemTable = SystemTable;
+  Smm.SwSmiValue = SW_SMI_VALUE;
+  SerialInit();
+  LogText( "mem smm init\n" );
+  Status = InitSmm();
+
+  if ( !EFI_ERROR( Status ) ) {
+    Status = RegisterConfigComm();
+    ( void )Status;
+    Status = ConfigureFromPublishedTable();
+
+    if ( EFI_ERROR( Status ) ) {
+      LogStatus( "smm published config failed ", Status );
     }
   } else {
-    logStatus( "smm init failed ", status );
+    LogStatus( "smm init failed ", Status );
   }
-  logText( "mem smm done\n" );
+
+  LogText( "mem smm done\n" );
   return EFI_SUCCESS;
 }
