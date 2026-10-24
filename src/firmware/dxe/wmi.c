@@ -1,11 +1,9 @@
 #include "internal.h"
 
-static EFI_STATUS InstallWmiTable( BOOLEAN Fast ) {
+EFI_STATUS InstallWmi( VOID ) {
   EFI_ACPI_TABLE_PROTOCOL *Acpi = 0;
-  UINT32 *Installed = Fast ? &Dxe.FastWmiInstalled : &Dxe.WmiInstalled;
-  UINT8 *Buffer = Fast ? Dxe.FastSsdt : Dxe.Ssdt;
 
-  if ( *Installed ) {
+  if ( Dxe.WmiInstalled ) {
     return EFI_SUCCESS;
   }
 
@@ -16,43 +14,19 @@ static EFI_STATUS InstallWmiTable( BOOLEAN Fast ) {
     return EFI_ERROR( Status ) ? Status : EFI_NOT_FOUND;
   }
 
-  UINTN Size = BuildSsdt( Buffer, sizeof( Dxe.Ssdt ), Fast );
+  UINTN Size = BuildSsdt( Dxe.Ssdt, sizeof( Dxe.Ssdt ) );
 
   if ( !Size ) {
     return EFI_OUT_OF_RESOURCES;
   }
 
   UINTN Key = 0;
-  Status = Acpi->InstallAcpiTable( Acpi, Buffer, Size, &Key );
+  Status = Acpi->InstallAcpiTable( Acpi, Dxe.Ssdt, Size, &Key );
 
   if ( !EFI_ERROR( Status ) ) {
-    *Installed = 1;
-
-    if ( Fast ) {
-      // Refresh features if SMM was configured before ACPI became available
-      Dxe.Configured = 0;
-    }
-
-    LogText( Fast ? "dxe fast ssdt installed\n" : "dxe ssdt installed\n" );
+    Dxe.WmiInstalled = 1;
+    LogText( "dxe ssdt installed\n" );
   }
 
   return Status;
-}
-
-EFI_STATUS InstallWmi( VOID ) {
-  Dxe.WmiAttempts++;
-  EFI_STATUS Status = InstallWmiTable( 0 );
-
-  if ( EFI_ERROR( Status ) ) {
-    return Status;
-  }
-
-  // Keep legacy access available if the optional fast table fails
-  Status = InstallWmiTable( 1 );
-
-  if ( EFI_ERROR( Status ) && Dxe.WmiAttempts <= 3 ) {
-    LogStatus( "dxe fast ssdt unavailable ", Status );
-  }
-
-  return EFI_SUCCESS;
 }

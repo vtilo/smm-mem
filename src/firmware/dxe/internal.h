@@ -47,15 +47,12 @@ typedef struct {
   UINT32 Configured;
   UINT32 ConfigureAttempts;
   UINT32 WmiInstalled;
-  UINT32 FastWmiInstalled;
-  UINT32 WmiAttempts;
   CONFIG PublishedConfig;
   UINT8 Ssdt[512];
-  UINT8 FastSsdt[512];
 } DxeState;
 
 extern DxeState Dxe;
-UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast );
+UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity );
 EFI_STATUS AllocateMailbox( VOID );
 EFI_STATUS InstallWmi( VOID );
 EFI_STATUS PublishConfig( VOID );

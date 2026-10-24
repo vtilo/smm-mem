@@ -21,7 +21,9 @@ The project consists of two firmware components: `Dxe.efi` for the ACPI WMI door
 - `src/protocol.h` defines the request and response format used by the API and firmware.
 - `tests/` contains explicit VM-only smoke tests and benchmarks.
 
-The API and firmware can negotiate a compact WMI endpoint and a private, locked transfer buffer. Older firmware or unavailable fast-path resources use the original transport automatically. Each firmware transfer is bounded to 4 KiB; large application reads are split without requiring callers to change their code.
+The API uses one ACPI WMI device with 64-byte requests and responses. A private, locked 4 KiB buffer carries larger memory transfers and lookup data. Each firmware transfer is bounded to 4 KiB; large application reads are split without requiring callers to change their code.
+
+Update the API and both firmware modules together. Protocol version 2 replaces the old interfaces. `Init()` checks the protocol and prepares the transfer buffer, returning failure if either step is unavailable.
 
 ## API
 

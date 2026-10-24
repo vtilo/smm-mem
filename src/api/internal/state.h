@@ -18,10 +18,6 @@ typedef struct {
   WmiCloseBlockFn CloseBlock;
   HANDLE Block;
   size_t Instance;
-  HANDLE FastBlock;
-  size_t FastInstance;
-  int FastChecked;
-  int FastAvailable;
   uint8_t *Staging;
   uint32_t Pid;
   uint64_t Sequence;
@@ -29,20 +25,13 @@ typedef struct {
 
 static ApiState Api;
 static SRWLOCK ApiLock = SRWLOCK_INIT;
-
 static GUID MemoryGuid = MEMORY_WMI_GUID;
-
-static GUID FastMemoryGuid = FAST_MEMORY_WMI_GUID;
 
 static const wchar_t *const MemoryInstances[] = {
   L"ACPI\\PNP0C14\\Mem_0", L"ACPI\\PNP0C14\\SMMM_0", L"ACPI\\PNP0C14\\0_0", L"" };
 
-static const wchar_t *const FastMemoryInstances[] = {
-  L"ACPI\\PNP0C14\\MemFast_0", L"ACPI\\PNP0C14\\SMMF_0", L"" };
-
 #define WMI_GUID_EXECUTE 0x0010U
 #define WMI_METHOD_ID 1U
 #define WMI_INSTANCE_COUNT ( sizeof( MemoryInstances ) / sizeof( MemoryInstances[0] ) )
-#define FAST_WMI_INSTANCE_COUNT ( sizeof( FastMemoryInstances ) / sizeof( FastMemoryInstances[0] ) )
 
 #endif

@@ -24,11 +24,11 @@ Large read and write requests are chunked automatically by the API. Callers can 
 
 The library serializes its transport state within a process. Firmware ACPI methods serialize access to the shared mailbox across callers. A large read or write can contain several requests and is not an atomic snapshot.
 
-Keep the caller's buffers valid until the API returns. The optional fast path owns its own locked staging page; it does not lock or change the residency of the caller's buffers. If fast-path negotiation or staging allocation is unavailable, calls retain the legacy transport.
+Keep the caller's buffers valid until the API returns. The API owns a locked 4 KiB staging page and does not lock or change the residency of the caller's buffers. Small reads and writes fit inside the 64-byte control messages. Larger memory transfers and process, module and export queries use the staging page.
 
 `Dump()` callback chunk sizes may vary up to a page. Consume the supplied `Size` rather than assuming a fixed chunk length.
 
-Define `SMM_DISABLE_FAST` when compiling `api.c` to force the legacy transport. The default negotiates the fast endpoint and falls back when it is unavailable.
+There is one ACPI WMI interface and one protocol version. Update the API and both firmware modules together. `Init()` fails if the interface, protocol version, buffer allocation or buffer lock is unavailable. There is no legacy transport fallback.
 
 A failed transfer may have completed earlier chunks. Writes are not automatically replayed after an ambiguous transport failure. Each firmware transfer is limited to 4 KiB so a large API call does not become one unbounded SMM operation.
 
@@ -102,11 +102,11 @@ Return nonzero to continue dumping. Return `0` to stop.
 int Init(void);
 ```
 
-Opens the ACPI WMI block used to communicate with the firmware doorbell.
+Opens the ACPI WMI interface, allocates and locks the private transfer page, and verifies the firmware protocol with a ping.
 
 Call this once before using any other API function.
 
-Returns nonzero if the WMI block was opened successfully.
+Returns nonzero after all initialization steps succeed. A failure releases any resources already acquired so initialization can be retried.
 
 ## Close
 
@@ -114,7 +114,7 @@ Returns nonzero if the WMI block was opened successfully.
 void Close(void);
 ```
 
-Closes the WMI handle and releases the loaded Windows API library.
+Closes the WMI handle, unlocks and frees the transfer page, and releases the loaded Windows API library.
 
 Call this when your application is done using the API.
 

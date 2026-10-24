@@ -73,7 +73,6 @@ typedef struct {
   UINT64 MapWindowBase;
   UINT32 MapWindowBaseValid;
   BOOLEAN KernelStable;
-  UINT32 Features;
   ProcessHint ProcessHints[PROCESS_HINT_COUNT];
   UINT32 NextProcessHint;
 } SmmState;
@@ -85,7 +84,9 @@ typedef struct {
 
 extern SmmState Smm;
 EFI_STATUS ResolveProcess( UINT32 Pid, ProcessContext *Process );
+EFI_STATUS ResolveCallerBuffer( const REQUEST *Request, UINT32 Size, ProcessContext *Caller );
 EFI_STATUS TransferBuffer( REQUEST *Request, UINT64 *Transferred );
+EFI_STATUS QueryBuffer( REQUEST *Request, UINT64 *Result, UINT32 *Size );
 
 VOID WritePte( volatile UINT64 *Entry, UINT64 Value );
 BOOLEAN IsKernelPointer( UINT64 Value );
@@ -134,7 +135,7 @@ VOID Reply( RESPONSE *Response,
   EFI_STATUS Status,
   UINT64 Result,
   const VOID *Data,
-  UINT32 DataSize );
+  UINT32 Size );
 EFI_STATUS HandleRequest( REQUEST *Request, RESPONSE *Response );
 EFI_STATUS ProcessRequest( VOID );
 EFI_STATUS EFIAPI SwSmiHandler(

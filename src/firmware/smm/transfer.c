@@ -9,7 +9,7 @@ typedef struct {
   BOOLEAN Mapped;
 } TransferRange;
 
-static BOOLEAN ValidUserRange( UINT64 Address, UINT64 Size ) {
+static BOOLEAN ValidUserRange( UINT64 Address, UINT32 Size ) {
   return Size != 0 && Address >= 0x10000 && Address < 0x0000800000000000ULL &&
          Size <= 0x0000800000000000ULL - Address;
 }
@@ -31,6 +31,20 @@ static EFI_STATUS ValidateRange( UINT64 Cr3, UINT64 Address, UINT32 Size ) {
     }
 
     Done += Chunk;
+  }
+
+  return EFI_SUCCESS;
+}
+
+EFI_STATUS ResolveCallerBuffer( const REQUEST *Request, UINT32 Size, ProcessContext *Caller ) {
+  if ( Size == 0 || Size > BUFFER_TRANSFER_SIZE || Request->CallerPid == 0 ||
+       Request->CallerPid == 4 || !ValidUserRange( Request->Buffer, Size ) ) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  if ( ResolveProcess( Request->CallerPid, Caller ) != EFI_SUCCESS ||
+       ValidateRange( Caller->Cr3, Request->Buffer, Size ) != EFI_SUCCESS ) {
+    return EFI_NOT_FOUND;
   }
 
   return EFI_SUCCESS;
@@ -59,82 +73,55 @@ static EFI_STATUS MapRange( TransferRange *Range, UINT64 Offset, UINT64 *Physica
 }
 
 EFI_STATUS TransferBuffer( REQUEST *Request, UINT64 *Transferred ) {
-  TRANSFER_BUFFER Buffer;
   ProcessContext Caller;
   ProcessContext Target = { 0 };
   TransferRange Source = { 0 };
   TransferRange Destination = { 0 };
-  UINT64 TargetAddress;
-  UINT64 RequestedSize;
-  UINT32 Size;
   UINT32 Done = 0;
-  BOOLEAN Write;
-  BOOLEAN VirtualMemory;
+  BOOLEAN Write = Request->Command == WRITE_VIRT || Request->Command == WRITE_PHYS;
+  BOOLEAN VirtualMemory = Request->Command == READ_VIRT || Request->Command == WRITE_VIRT;
   UINT8 Scratch[512];
+  EFI_STATUS Status;
 
   *Transferred = 0;
 
-  if ( ( Smm.Features & FEATURE_BUFFER_TRANSFER ) == 0 ) {
-    return EFI_UNSUPPORTED;
-  }
-
-  if ( Request->DataSize != sizeof( Buffer ) ) {
+  if ( Request->Size == 0 || Request->Size > BUFFER_TRANSFER_SIZE ||
+       Request->Address > ~0ULL - ( Request->Size - 1U ) ) {
     return EFI_INVALID_PARAMETER;
   }
 
-  MemoryCopy( &Buffer, Request->Data, sizeof( Buffer ) );
+  Status = ResolveCallerBuffer( Request, Request->Size, &Caller );
 
-  if ( Buffer.Pid == 0 || Buffer.Pid == 4 ) {
-    return EFI_INVALID_PARAMETER;
-  }
-
-  VirtualMemory = Request->Command == READ_VIRT_BUFFER || Request->Command == WRITE_VIRT_BUFFER;
-  Write = Request->Command == WRITE_VIRT_BUFFER || Request->Command == WRITE_PHYS_BUFFER;
-  TargetAddress = VirtualMemory ? Request->Arg2 : Request->Arg1;
-  RequestedSize = VirtualMemory ? Request->Arg3 : Request->Arg2;
-
-  if ( RequestedSize == 0 || RequestedSize > BUFFER_TRANSFER_SIZE ||
-       !ValidUserRange( Buffer.Address, RequestedSize ) ||
-       TargetAddress + RequestedSize < TargetAddress ) {
-    return EFI_INVALID_PARAMETER;
-  }
-
-  Size = ( UINT32 )RequestedSize;
-
-  if ( ResolveProcess( Buffer.Pid, &Caller ) != EFI_SUCCESS ||
-       ValidateRange( Caller.Cr3, Buffer.Address, Size ) != EFI_SUCCESS ) {
-    return EFI_NOT_FOUND;
+  if ( EFI_ERROR( Status ) ) {
+    return Status;
   }
 
   if ( VirtualMemory ) {
-    if ( ( UINT32 )Request->Arg1 == Buffer.Pid ) {
+    if ( Request->Pid == Request->CallerPid ) {
       Target = Caller;
-    } else {
-      if ( ResolveProcess( ( UINT32 )Request->Arg1, &Target ) != EFI_SUCCESS ) {
-        return EFI_NOT_FOUND;
-      }
+    } else if ( ResolveProcess( Request->Pid, &Target ) != EFI_SUCCESS ) {
+      return EFI_NOT_FOUND;
     }
 
-    if ( ValidateRange( Target.Cr3, TargetAddress, Size ) != EFI_SUCCESS ) {
+    if ( ValidateRange( Target.Cr3, Request->Address, Request->Size ) != EFI_SUCCESS ) {
       return EFI_NOT_FOUND;
     }
   }
 
   Source.Cr3 = Write ? Caller.Cr3 : ( VirtualMemory ? Target.Cr3 : 0 );
-  Source.Address = Write ? Buffer.Address : TargetAddress;
+  Source.Address = Write ? Request->Buffer : Request->Address;
   Source.VirtualMemory = Write || VirtualMemory;
   Destination.Cr3 = Write ? ( VirtualMemory ? Target.Cr3 : 0 ) : Caller.Cr3;
-  Destination.Address = Write ? TargetAddress : Buffer.Address;
+  Destination.Address = Write ? Request->Address : Request->Buffer;
   Destination.VirtualMemory = !Write || VirtualMemory;
 
-  while ( Done < Size ) {
+  while ( Done < Request->Size ) {
     UINT64 From;
     UINT64 To;
-    UINT32 Chunk = Size - Done;
+    UINT32 Chunk = Request->Size - Done;
     UINT32 SourceLeft = ( UINT32 )( PAGE_SIZE - ( ( Source.Address + Done ) & ( PAGE_SIZE - 1 ) ) );
     UINT32 DestinationLeft =
       ( UINT32 )( PAGE_SIZE - ( ( Destination.Address + Done ) & ( PAGE_SIZE - 1 ) ) );
-    EFI_STATUS Status;
 
     if ( Chunk > sizeof( Scratch ) ) {
       Chunk = sizeof( Scratch );

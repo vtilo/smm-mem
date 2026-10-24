@@ -166,20 +166,8 @@ EFI_STATUS EFIAPI ConfigCommHandler(
   }
 
   Config = ( CONFIG * )CommBuffer;
-  Smm.Features = 0;
   Config->Status = ApplyConfig( Config, "comm" );
-
-  if ( !EFI_ERROR( Config->Status ) && *CommBufferSize >= sizeof( CONFIG_EXTENDED ) ) {
-    CONFIG_EXTENDED *Extended = ( CONFIG_EXTENDED * )CommBuffer;
-
-    if ( Extended->ExtensionMagic == FAST_CONFIG_MAGIC && Extended->Reserved == 0 ) {
-      Smm.Features = Extended->Features & FEATURE_BUFFER_TRANSFER;
-    }
-  }
-
-  LogText( "smm transport features=0x" );
-  LogHex( Smm.Features );
-  LogText( " bytes=0x" );
+  LogText( "smm config bytes=0x" );
   LogHex( *CommBufferSize );
   LogText( "\n" );
   return EFI_SUCCESS;

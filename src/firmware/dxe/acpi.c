@@ -91,7 +91,7 @@ static UINT8 *EmitMutex( UINT8 *Out ) {
   return EmitName( Out, "SMML" );
 }
 
-UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast ) {
+UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity ) {
   AcpiHeader *Header = ( AcpiHeader * )Buffer;
   UINT8 *Out = Buffer + sizeof( AcpiHeader );
   UINT8 *ScopePkg;
@@ -109,7 +109,7 @@ UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast ) {
   Header->Signature = Signature32( 'S', 'S', 'D', 'T' );
   Header->Revision = 2;
   MemoryCopy( Header->OemId, "MEMDEV", 6 );
-  MemoryCopy( Header->OemTableId, Fast ? "MEMFAST " : "MEMDEV  ", 8 );
+  MemoryCopy( Header->OemTableId, "MEMDEV  ", 8 );
   Header->OemRevision = 1;
   Header->CreatorId = Signature32( 'S', 'M', 'M', 'M' );
   Header->CreatorRevision = 1;
@@ -124,24 +124,22 @@ UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast ) {
   *Out++ = 0x82;
   DevicePkg = Out;
   Out = ReservePkgLen( Out );
-  Out = EmitName( Out, Fast ? "SMMF" : "SMMM" );
+  Out = EmitName( Out, "SMMM" );
 
-  if ( !Fast ) {
-    *Out++ = 0x5B;
-    *Out++ = 0x01;
-    Out = EmitName( Out, "SMML" );
-    *Out++ = 0;
-  }
+  *Out++ = 0x5B;
+  *Out++ = 0x01;
+  Out = EmitName( Out, "SMML" );
+  *Out++ = 0;
 
   *Out++ = 0x08;
   Out = EmitName( Out, "_HID" );
   Out = EmitString( Out, "PNP0C14" );
   *Out++ = 0x08;
   Out = EmitName( Out, "_UID" );
-  Out = EmitString( Out, Fast ? "MemFast" : "Mem" );
+  Out = EmitString( Out, "Mem" );
 
   MemoryClear( Wdg, sizeof( Wdg ) );
-  MemoryCopy( Wdg, Fast ? &FastWmiGuid : &WmiGuid, sizeof( WmiGuid ) );
+  MemoryCopy( Wdg, &WmiGuid, sizeof( WmiGuid ) );
   Wdg[16] = 'B';
   Wdg[17] = 'D';
   Wdg[18] = 1;
@@ -175,7 +173,7 @@ UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast ) {
   Out = EmitName( Out, "MREQ" );
   *Out++ = 0x00;
   Out = EmitDwordConst( Out, ( UINT32 )Dxe.MailboxPhysical );
-  Out = EmitDwordConst( Out, ( Fast ? FAST_REQUEST_SIZE : REQUEST_SIZE ) );
+  Out = EmitDwordConst( Out, REQUEST_SIZE );
 
   *Out++ = 0x5B;
   *Out++ = 0x81;
@@ -184,7 +182,7 @@ UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast ) {
   Out = EmitName( Out, "MREQ" );
   *Out++ = 0x01;
   Out = EmitName( Out, "WMRQ" );
-  Out = EmitPkgLength( Out, ( Fast ? FAST_REQUEST_SIZE : REQUEST_SIZE ) * 8U );
+  Out = EmitPkgLength( Out, REQUEST_SIZE * 8U );
   PatchPkgLen( ReqFieldPkg, ( UINTN )( Out - ReqFieldPkg ) );
 
   *Out++ = 0x5B;
@@ -192,7 +190,7 @@ UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast ) {
   Out = EmitName( Out, "MOUT" );
   *Out++ = 0x00;
   Out = EmitDwordConst( Out, ( UINT32 )( Dxe.MailboxPhysical + RESPONSE_OFFSET ) );
-  Out = EmitDwordConst( Out, ( Fast ? FAST_RESPONSE_SIZE : RESPONSE_SIZE ) );
+  Out = EmitDwordConst( Out, RESPONSE_SIZE );
 
   *Out++ = 0x5B;
   *Out++ = 0x81;
@@ -201,7 +199,7 @@ UINTN BuildSsdt( UINT8 *Buffer, UINTN Capacity, BOOLEAN Fast ) {
   Out = EmitName( Out, "MOUT" );
   *Out++ = 0x01;
   Out = EmitName( Out, "WOUT" );
-  Out = EmitPkgLength( Out, ( Fast ? FAST_RESPONSE_SIZE : RESPONSE_SIZE ) * 8U );
+  Out = EmitPkgLength( Out, RESPONSE_SIZE * 8U );
   PatchPkgLen( OutFieldPkg, ( UINTN )( Out - OutFieldPkg ) );
 
   *Out++ = 0x14;

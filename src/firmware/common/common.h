@@ -41,6 +41,5 @@ extern EFI_GUID SmmBase2Guid;
 extern EFI_GUID SmmSwDispatchGuid;
 extern EFI_GUID SmmCommunicationGuid;
 extern EFI_GUID AcpiTableGuid;
-extern EFI_GUID FastWmiGuid;
 
 #endif

@@ -5,181 +5,112 @@ VOID Reply( RESPONSE *Response,
   EFI_STATUS Status,
   UINT64 Result,
   const VOID *Data,
-  UINT32 DataSize ) {
-  UINT32 StatusCode;
+  UINT32 Size ) {
+  UINT32 StatusCode = ( UINT32 )Status;
 
   MemoryClear( Response, sizeof( *Response ) );
   Response->Magic = RESP_MAGIC;
-  StatusCode = ( UINT32 )Status;
-  Response->Status = EFI_ERROR( Status ) ? ( StatusCode != 0 ? StatusCode : 1U ) : 0;
+  Response->Status = EFI_ERROR( Status ) ? ( StatusCode != 0 ? StatusCode : 1U ) : STATUS_OK;
   Response->Command = Request->Command;
   Response->Sequence = Request->Sequence;
   Response->Result = Result;
+  Response->Version = PROTOCOL_VERSION;
+  Response->Size = Size;
 
-  if ( DataSize > RESPONSE_DATA_SIZE ) {
-    DataSize = RESPONSE_DATA_SIZE;
-  }
+  if ( Data != 0 && Size != 0 ) {
+    if ( Size > INLINE_READ_SIZE ) {
+      Response->Status = 1;
+      Response->Size = 0;
+      return;
+    }
 
-  Response->DataSize = DataSize;
-
-  if ( Data != 0 && DataSize != 0 ) {
-    MemoryCopy( Response->Data, Data, DataSize );
+    MemoryCopy( Response->Data, Data, Size );
   }
 }
 
-EFI_STATUS HandleRequest( REQUEST *Request, RESPONSE *Response ) {
-  PROCESS_INFO Process;
+static EFI_STATUS HandleMemory( REQUEST *Request, RESPONSE *Response ) {
   ProcessContext Context;
-  MODULE_INFO Module;
+  BOOLEAN Write = Request->Command == WRITE_PHYS || Request->Command == WRITE_VIRT;
+  BOOLEAN VirtualMemory = Request->Command == READ_VIRT || Request->Command == WRITE_VIRT;
+  UINT8 Data[INLINE_READ_SIZE] = { 0 };
+  UINT64 Transferred = 0;
   EFI_STATUS Status;
-  UINT32 Size;
-  UINT64 Pa = 0;
-  UINT64 Address = 0;
-  UINT8 Scratch[RESPONSE_DATA_SIZE];
 
-  MemoryClear( &Process, sizeof( Process ) );
-  MemoryClear( &Module, sizeof( Module ) );
-  MemoryClear( Scratch, sizeof( Scratch ) );
+  if ( Request->Buffer != 0 ) {
+    Status = TransferBuffer( Request, &Transferred );
+    Reply( Response, Request, Status, 0, 0, ( UINT32 )Transferred );
+    return Status;
+  }
+
+  if ( Request->Size == 0 || Request->Size > ( Write ? INLINE_WRITE_SIZE : INLINE_READ_SIZE ) ||
+       Request->Address > ~0ULL - ( Request->Size - 1U ) ) {
+    Reply( Response, Request, EFI_INVALID_PARAMETER, 0, 0, 0 );
+    return EFI_INVALID_PARAMETER;
+  }
+
+  VOID *Bytes = Write ? Request->Data : Data;
+
+  if ( VirtualMemory ) {
+    Status = ResolveProcess( Request->Pid, &Context );
+
+    if ( !EFI_ERROR( Status ) ) {
+      Status = CopyVirtual( Context.Cr3, Request->Address, Bytes, Request->Size, Write );
+    }
+  } else {
+    Status = CopyPhysical( Request->Address, Bytes, Request->Size, Write );
+  }
+
+  Reply( Response,
+    Request,
+    Status,
+    0,
+    Write || EFI_ERROR( Status ) ? 0 : Data,
+    EFI_ERROR( Status ) ? 0 : Request->Size );
+
+  return Status;
+}
+
+EFI_STATUS HandleRequest( REQUEST *Request, RESPONSE *Response ) {
+  ProcessContext Context;
+  EFI_STATUS Status;
+  UINT64 Result = 0;
+  UINT32 Size = 0;
 
   if ( Request->Magic != REQ_MAGIC ) {
+    MemoryClear( Response, sizeof( *Response ) );
     return EFI_NOT_FOUND;
   }
 
-  Size = ( UINT32 )Request->Arg3;
-
   if ( Request->Command == PING ) {
-    Reply( Response,
-      Request,
-      EFI_SUCCESS,
-      ( Smm.Features & FEATURE_BUFFER_TRANSFER ) ? FAST_CAPABILITY : 0,
-      0,
-      0 );
-    return EFI_SUCCESS;
-  }
-
-  if ( Request->Command >= READ_VIRT_BUFFER && Request->Command <= WRITE_PHYS_BUFFER ) {
-    UINT64 Transferred = 0;
-
-    Status = TransferBuffer( Request, &Transferred );
-    Reply( Response, Request, Status, Transferred, 0, 0 );
+    Status = Request->Size == 0 && Request->Buffer == 0 ? EFI_SUCCESS : EFI_INVALID_PARAMETER;
+    Reply( Response, Request, Status, PROTOCOL_VERSION, 0, 0 );
     return Status;
   }
 
-  if ( Request->Command == READ_PHYS ) {
-    Size = ( UINT32 )Request->Arg2;
-
-    if ( Size > RESPONSE_DATA_SIZE ) {
-      Reply( Response, Request, EFI_INVALID_PARAMETER, 0, 0, 0 );
-      return EFI_INVALID_PARAMETER;
-    }
-
-    Status = CopyPhysical( Request->Arg1, Scratch, Size, 0 );
-    Reply( Response, Request, Status, Request->Arg1, Scratch, EFI_ERROR( Status ) ? 0 : Size );
-    return Status;
+  if ( Request->Command == READ_PHYS || Request->Command == WRITE_PHYS ||
+       Request->Command == READ_VIRT || Request->Command == WRITE_VIRT ) {
+    return HandleMemory( Request, Response );
   }
 
-  if ( Request->Command == WRITE_PHYS ) {
-    Status = Request->DataSize <= RESPONSE_DATA_SIZE
-               ? CopyPhysical( Request->Arg1, Request->Data, Request->DataSize, 1 )
-               : EFI_INVALID_PARAMETER;
-    Reply( Response, Request, Status, Request->Arg1, 0, 0 );
-    return Status;
-  }
-
-  if ( Request->Command == FIND_PROCESS_PID ) {
-    Status = FindProcessPid( ( UINT32 )Request->Arg1, &Process );
-    Reply( Response,
-      Request,
-      Status,
-      Process.Eprocess,
-      &Process,
-      EFI_ERROR( Status ) ? 0 : sizeof( Process ) );
-
-    return Status;
-  }
-
-  if ( Request->Command == FIND_PROCESS_NAME ) {
-    Status = FindProcessName( ( char * )Request->Data, &Process );
-    Reply( Response,
-      Request,
-      Status,
-      Process.Eprocess,
-      &Process,
-      EFI_ERROR( Status ) ? 0 : sizeof( Process ) );
-
+  if ( Request->Command >= FIND_PROCESS_PID && Request->Command <= FIND_EXPORT ) {
+    Status = QueryBuffer( Request, &Result, &Size );
+    Reply( Response, Request, Status, Result, 0, Size );
     return Status;
   }
 
   if ( Request->Command == TRANSLATE_VIRT ) {
-    Status = ResolveProcess( ( UINT32 )Request->Arg1, &Context );
-
-    if ( !EFI_ERROR( Status ) ) {
-      Status = TranslateVirtual( Context.Cr3, Request->Arg2, &Pa );
-    }
-
-    Reply( Response, Request, Status, EFI_ERROR( Status ) ? 0 : Pa, 0, 0 );
-    return Status;
-  }
-
-  if ( Request->Command == READ_VIRT ) {
-    if ( Size > RESPONSE_DATA_SIZE ) {
+    if ( Request->Size != 0 || Request->Buffer != 0 ) {
       Reply( Response, Request, EFI_INVALID_PARAMETER, 0, 0, 0 );
       return EFI_INVALID_PARAMETER;
     }
 
-    Status = ResolveProcess( ( UINT32 )Request->Arg1, &Context );
+    Status = ResolveProcess( Request->Pid, &Context );
 
     if ( !EFI_ERROR( Status ) ) {
-      Status = CopyVirtual( Context.Cr3, Request->Arg2, Scratch, Size, 0 );
+      Status = TranslateVirtual( Context.Cr3, Request->Address, &Result );
     }
 
-    Reply( Response, Request, Status, Request->Arg2, Scratch, EFI_ERROR( Status ) ? 0 : Size );
-    return Status;
-  }
-
-  if ( Request->Command == WRITE_VIRT ) {
-    if ( Request->DataSize > RESPONSE_DATA_SIZE ) {
-      Reply( Response, Request, EFI_INVALID_PARAMETER, 0, 0, 0 );
-      return EFI_INVALID_PARAMETER;
-    }
-
-    Status = ResolveProcess( ( UINT32 )Request->Arg1, &Context );
-
-    if ( !EFI_ERROR( Status ) ) {
-      Status = CopyVirtual( Context.Cr3, Request->Arg2, Request->Data, Request->DataSize, 1 );
-    }
-
-    Reply( Response, Request, Status, Request->Arg2, 0, 0 );
-    return Status;
-  }
-
-  if ( Request->Command == FIND_MODULE ) {
-    Status = FindUserModule( ( UINT32 )Request->Arg1, ( char * )Request->Data, &Module );
-    Reply(
-      Response, Request, Status, Module.Base, &Module, EFI_ERROR( Status ) ? 0 : sizeof( Module ) );
-    return Status;
-  }
-
-  if ( Request->Command == FIND_KERNEL_MODULE ) {
-    Status = ResolveKernelModule( ( char * )Request->Data, &Module );
-    Reply(
-      Response, Request, Status, Module.Base, &Module, EFI_ERROR( Status ) ? 0 : sizeof( Module ) );
-    return Status;
-  }
-
-  if ( Request->Command == FIND_EXPORT ) {
-    if ( Request->DataSize <= sizeof( MODULE_INFO ) ) {
-      Reply( Response, Request, EFI_INVALID_PARAMETER, 0, 0, 0 );
-      return EFI_INVALID_PARAMETER;
-    }
-
-    MemoryCopy( &Module, Request->Data, sizeof( Module ) );
-    Address = 0;
-    Status = ResolveExport( Module.Cr3 != 0 ? Module.Cr3 : Smm.KernelCr3,
-      Module.Base,
-      ( char * )( Request->Data + sizeof( Module ) ),
-      &Address );
-    Reply( Response, Request, Status, Address, 0, 0 );
+    Reply( Response, Request, Status, EFI_ERROR( Status ) ? 0 : Result, 0, 0 );
     return Status;
   }
 

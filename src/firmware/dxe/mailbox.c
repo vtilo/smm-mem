@@ -11,7 +11,7 @@ EFI_STATUS AllocateMailbox( VOID ) {
     return EFI_SUCCESS;
   }
 
-  // The legacy AML mailbox address is encoded as a DWord
+  // The AML mailbox address is encoded as a DWord
   Dxe.MailboxPhysical = 0xFFFFFFFFULL;
   Status = Dxe.SystemTable->BootServices->AllocatePages(
     AllocateMaxAddress, EFI_RUNTIME_SERVICES_DATA, Pages, &Dxe.MailboxPhysical );
@@ -165,7 +165,6 @@ static VOID RestoreSmmCommRegionType( VOID *CommBuffer, UINT32 OriginalType ) {
 EFI_STATUS ConfigureSmm( VOID ) {
   EFI_SMM_COMMUNICATION_PROTOCOL *SmmComm = 0;
   EFI_SMM_COMMUNICATE_HEADER *Header;
-  CONFIG_EXTENDED *Message;
   CONFIG *Config;
   VOID *CommBuffer;
   UINT32 OriginalRegionType;
@@ -195,7 +194,7 @@ EFI_STATUS ConfigureSmm( VOID ) {
     return EFI_ERROR( Status ) ? Status : EFI_NOT_FOUND;
   }
 
-  CommSize = sizeof( EFI_SMM_COMMUNICATE_HEADER ) + sizeof( CONFIG_EXTENDED ) + 16;
+  CommSize = sizeof( EFI_SMM_COMMUNICATE_HEADER ) + sizeof( CONFIG ) + 16;
   CommBuffer = FindSmmCommRegion( CommSize, &OriginalRegionType, LogIt );
 
   if ( CommBuffer == 0 ) {
@@ -209,11 +208,8 @@ EFI_STATUS ConfigureSmm( VOID ) {
   MemoryClear( CommBuffer, CommSize );
   Header = ( EFI_SMM_COMMUNICATE_HEADER * )CommBuffer;
   Header->HeaderGuid = ConfigCommGuid;
-  Header->MessageLength = sizeof( CONFIG_EXTENDED );
-  Message = ( CONFIG_EXTENDED * )Header->Data;
-  Config = &Message->Base;
-  Message->ExtensionMagic = FAST_CONFIG_MAGIC;
-  Message->Features = Dxe.FastWmiInstalled ? FEATURE_BUFFER_TRANSFER : 0;
+  Header->MessageLength = sizeof( CONFIG );
+  Config = ( CONFIG * )Header->Data;
   Config->Magic = CONFIG_MAGIC;
   Config->MailboxPhysical = Dxe.MailboxPhysical;
   Config->MailboxSize = MAILBOX_SIZE;
