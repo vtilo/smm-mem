@@ -9,6 +9,7 @@
 #pragma intrinsic( __readcr0 )
 #pragma intrinsic( __writecr0 )
 #pragma intrinsic( __readcr3 )
+#pragma intrinsic( __readcr4 )
 #pragma intrinsic( __writecr3 )
 #pragma intrinsic( __readmsr )
 #pragma intrinsic( __cpuidex )

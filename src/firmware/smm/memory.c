@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "mapping.h"
 
 VOID WritePte( volatile UINT64 *Entry, UINT64 Value ) {
   UINT64 Cr0;
@@ -112,13 +113,17 @@ EFI_STATUS CopyPhysical( UINT64 Address, VOID *Buffer, UINTN Size, BOOLEAN Write
       Chunk = Size;
     }
 
-    Status = MapWindow( Address );
+    if ( IsIdentityMapped( __readcr3(), __readcr4(), PhysicalMask(), Address, Chunk, Write ) ) {
+      Window = ( volatile UINT8 * )( UINTN )Address;
+    } else {
+      Status = MapWindow( Address );
 
-    if ( EFI_ERROR( Status ) ) {
-      return Status;
+      if ( EFI_ERROR( Status ) ) {
+        return Status;
+      }
+
+      Window = ( volatile UINT8 * )( UINTN )( Smm.MapWindow + Offset );
     }
-
-    Window = ( volatile UINT8 * )( UINTN )( Smm.MapWindow + Offset );
 
     for ( Index = 0; Index < Chunk; Index++ ) {
       if ( Write ) {
@@ -185,6 +190,12 @@ EFI_STATUS ReadPhysical64( UINT64 Address, UINT64 *Value ) {
 
   if ( ( Address & 7U ) != 0 ) {
     return CopyPhysical( Address, Value, sizeof( *Value ), 0 );
+  }
+
+  if ( IsIdentityMapped(
+         __readcr3(), __readcr4(), PhysicalMask(), Address, sizeof( *Value ), 0 ) ) {
+    *Value = *( volatile UINT64 * )( UINTN )Address;
+    return EFI_SUCCESS;
   }
 
   Status = MapWindow( Address );
