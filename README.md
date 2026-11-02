@@ -5,25 +5,9 @@
 
 ## About
 
-SmmMem exposes a source-only Windows API for reading, writing, translating, and resolving memory through an SMM handler running in ring -2. The API does not require a custom kernel driver. Usermode talks to ACPI WMI, ACPI rings a software SMI, and the SMM module handles the memory request.
+This project allows a regular usermode process to request memory operations from SMM without requiring a custom kernel driver, providing a usermode-to-SMM communication interface. Its C API supports physical and virtual memory reads and writes, translating VAs to PAs, and looking up processes, loaded modules, and exported symbols.
 
 https://github.com/user-attachments/assets/08513a12-0f89-47c3-982a-565fa84a9a5b
-
-The project consists of two firmware components: `Dxe.efi` for the ACPI WMI doorbell and mailbox setup, and `Smm.efi` for the actual memory API running inside SMM.
-
-## Source layout
-
-- `src/api/api.h` is the public API header; compile `src/api/api.c` into your application.
-- `src/api/internal/` contains the private transport and API implementation.
-- `src/firmware/dxe/` sets up the ACPI WMI interface and shared mailbox during boot.
-- `src/firmware/smm/` handles memory requests, process discovery, modules, and exports.
-- `src/firmware/common/` contains shared firmware helpers and UEFI declarations.
-- `src/protocol.h` defines the request and response format used by the API and firmware.
-- `tests/` contains explicit VM-only smoke tests and benchmarks.
-
-The API uses one ACPI WMI device with 64-byte requests and responses. A private, locked 4 KiB buffer carries larger memory transfers and lookup data. Each firmware transfer is bounded to 4 KiB; large application reads are split without requiring callers to change their code.
-
-Update the API and both firmware modules together. Protocol version 2 replaces the old interfaces. `Init()` checks the protocol and prepares the transfer buffer, returning failure if either step is unavailable.
 
 ## API
 
@@ -58,7 +42,7 @@ When copying the API sources into another project, keep `src/api/` and `src/prot
 cl /nologo /W4 /O2 /I src\api my_app.c src\api\api.c
 ```
 
-The default build produces only `Dxe.efi` and `Smm.efi`. Smoke tests and benchmarks are separate development targets run inside a VM; see [tests/README.md](tests/README.md).
+The default build produces only `Dxe.efi` and `Smm.efi`.
 
 Full API documentation is available in [API.md](API.md).
 
