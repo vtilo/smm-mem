@@ -32,6 +32,8 @@ There is one ACPI WMI interface and one protocol version. Update the API and bot
 
 A failed transfer may have completed earlier chunks. Writes are not automatically replayed after an ambiguous transport failure. Each firmware transfer is limited to 4 KiB so a large API call does not become one unbounded SMM operation.
 
+Memory access first tries an existing identity mapping with the required permissions. Otherwise it falls back to remapping and temporarily clears `CR0.WP` for PT updates. If firmware locks this operation, it can trigger a `#GP` fault and halt the system instead of returning an API error. `Init()` and `Ping()` may still succeed because they do not exercise this fallback. Firmware lock policy is up to the user.
+
 ## Types
 
 ### `PROCESS_INFO`
