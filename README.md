@@ -5,7 +5,7 @@
 
 ## About
 
-This project allows a regular usermode process to request memory operations from SMM without requiring a custom kernel driver, providing a usermode-to-SMM communication interface. Its C API supports physical and virtual memory reads and writes, translating VAs to PAs, and looking up processes, loaded modules, and exported symbols.
+This project was developed to let a regular usermode application request memory operations from SMM. It supports physical and virtual reads/writes, VA to PA translation, process and module lookups, export resolution and memory dumps. The API provides a **direct ring 3 → ring -2 communication interface**, allowing your application to request these operations through ACPI WMI without requiring a kernel driver
 
 https://github.com/user-attachments/assets/08513a12-0f89-47c3-982a-565fa84a9a5b
 
