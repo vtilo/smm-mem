@@ -33,7 +33,6 @@ typedef struct {
 
 #define EFI_RESERVED_MEMORY_TYPE 0U
 #define EFI_CONVENTIONAL_MEMORY 7U
-#define EFI_ACPI_MEMORY_NVS 10U
 
 typedef struct {
   EFI_SYSTEM_TABLE *SystemTable;

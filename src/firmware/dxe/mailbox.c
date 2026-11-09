@@ -1,5 +1,8 @@
 #include "internal.h"
 
+#pragma intrinsic( _InterlockedCompareExchange )
+#pragma intrinsic( _InterlockedExchange )
+
 static EFI_GUID CommunicationRegionGuid = {
   0x4e28ca50, 0xd582, 0x44ac, { 0xa1, 0x1f, 0xe3, 0xd5, 0x65, 0x26, 0xdb, 0x34 } };
 
@@ -45,12 +48,10 @@ EFI_STATUS PublishConfig( VOID ) {
   return Status;
 }
 
-static VOID *FindSmmCommRegion( UINTN RequiredSize, UINT32 *OriginalType, BOOLEAN LogIt ) {
+static MemoryDescriptor *AcquireSmmCommRegion( UINTN RequiredSize, BOOLEAN LogIt ) {
   CommunicationRegionTable *Table = 0;
   UINT8 *Entry;
   UINTN Index;
-
-  *OriginalType = 0xFFFFFFFFU;
 
   if ( Dxe.SystemTable == 0 || Dxe.SystemTable->ConfigurationTable == 0 ) {
     if ( LogIt ) {
@@ -94,30 +95,27 @@ static VOID *FindSmmCommRegion( UINTN RequiredSize, UINT32 *OriginalType, BOOLEA
     MemoryDescriptor *Desc = ( MemoryDescriptor * )( Entry + ( Index * Table->DescriptorSize ) );
     UINT64 Bytes = Desc->NumberOfPages << 12;
 
-    if ( Bytes < RequiredSize ) {
+    if ( Desc->PhysicalStart == 0 || Bytes < RequiredSize ) {
       continue;
     }
 
-    if ( Desc->Type == EFI_RESERVED_MEMORY_TYPE || Desc->Type == EFI_RUNTIME_SERVICES_DATA ||
-         Desc->Type == EFI_ACPI_MEMORY_NVS || Desc->Type == EFI_CONVENTIONAL_MEMORY ) {
-      *OriginalType = Desc->Type;
-
-      if ( LogIt ) {
-        LogText( "dxe smm comm region base=0x" );
-        LogHex( Desc->PhysicalStart );
-        LogText( " size=0x" );
-        LogHex( Bytes );
-        LogText( " type=0x" );
-        LogHex( *OriginalType );
-        LogText( "\n" );
-      }
-
-      if ( Desc->Type == EFI_CONVENTIONAL_MEMORY ) {
-        Desc->Type = EFI_RESERVED_MEMORY_TYPE;
-      }
-
-      return ( VOID * )( UINTN )Desc->PhysicalStart;
+    // Type marks availability in the comm region table
+    if ( ( UINT32 )_InterlockedCompareExchange( ( volatile long * )&Desc->Type,
+           EFI_RESERVED_MEMORY_TYPE, EFI_CONVENTIONAL_MEMORY ) != EFI_CONVENTIONAL_MEMORY ) {
+      continue;
     }
+
+    if ( LogIt ) {
+      LogText( "dxe smm comm region base=0x" );
+      LogHex( Desc->PhysicalStart );
+      LogText( " size=0x" );
+      LogHex( Bytes );
+      LogText( " type=0x" );
+      LogHex( Desc->Type );
+      LogText( "\n" );
+    }
+
+    return Desc;
   }
 
   if ( LogIt ) {
@@ -127,47 +125,12 @@ static VOID *FindSmmCommRegion( UINTN RequiredSize, UINT32 *OriginalType, BOOLEA
   return 0;
 }
 
-static VOID RestoreSmmCommRegionType( VOID *CommBuffer, UINT32 OriginalType ) {
-  CommunicationRegionTable *Table = 0;
-  UINT8 *Entry;
-  UINTN Index;
-
-  if ( CommBuffer == 0 || OriginalType != EFI_CONVENTIONAL_MEMORY || Dxe.SystemTable == 0 ||
-       Dxe.SystemTable->ConfigurationTable == 0 ) {
-    return;
-  }
-
-  for ( Index = 0; Index < Dxe.SystemTable->NumberOfTableEntries; Index++ ) {
-    EFI_CONFIGURATION_TABLE *Config = &Dxe.SystemTable->ConfigurationTable[Index];
-
-    if ( GuidEqual( &Config->VendorGuid, &CommunicationRegionGuid ) ) {
-      Table = ( CommunicationRegionTable * )Config->VendorTable;
-      break;
-    }
-  }
-
-  if ( Table == 0 ) {
-    return;
-  }
-
-  Entry = ( UINT8 * )( Table + 1 );
-
-  for ( Index = 0; Index < Table->NumberOfEntries; Index++ ) {
-    MemoryDescriptor *Desc = ( MemoryDescriptor * )( Entry + ( Index * Table->DescriptorSize ) );
-
-    if ( ( VOID * )( UINTN )Desc->PhysicalStart == CommBuffer ) {
-      Desc->Type = OriginalType;
-      return;
-    }
-  }
-}
-
 EFI_STATUS ConfigureSmm( VOID ) {
   EFI_SMM_COMMUNICATION_PROTOCOL *SmmComm = 0;
   EFI_SMM_COMMUNICATE_HEADER *Header;
   CONFIG *Config;
   VOID *CommBuffer;
-  UINT32 OriginalRegionType;
+  MemoryDescriptor *CommRegion;
   UINT32 Attempt;
   BOOLEAN LogIt;
   EFI_STATUS Status;
@@ -195,9 +158,9 @@ EFI_STATUS ConfigureSmm( VOID ) {
   }
 
   CommSize = sizeof( EFI_SMM_COMMUNICATE_HEADER ) + sizeof( CONFIG ) + 16;
-  CommBuffer = FindSmmCommRegion( CommSize, &OriginalRegionType, LogIt );
+  CommRegion = AcquireSmmCommRegion( CommSize, LogIt );
 
-  if ( CommBuffer == 0 ) {
+  if ( CommRegion == 0 ) {
     if ( LogIt ) {
       LogText( "dxe smm configure no comm buffer\n" );
     }
@@ -205,6 +168,7 @@ EFI_STATUS ConfigureSmm( VOID ) {
     return EFI_NOT_FOUND;
   }
 
+  CommBuffer = ( VOID * )( UINTN )CommRegion->PhysicalStart;
   MemoryClear( CommBuffer, CommSize );
   Header = ( EFI_SMM_COMMUNICATE_HEADER * )CommBuffer;
   Header->HeaderGuid = ConfigCommGuid;
@@ -221,7 +185,7 @@ EFI_STATUS ConfigureSmm( VOID ) {
     Status = Config->Status;
   }
 
-  RestoreSmmCommRegionType( CommBuffer, OriginalRegionType );
+  _InterlockedExchange( ( volatile long * )&CommRegion->Type, EFI_CONVENTIONAL_MEMORY );
 
   if ( !EFI_ERROR( Status ) ) {
     Dxe.Configured = 1;
