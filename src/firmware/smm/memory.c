@@ -211,7 +211,14 @@ EFI_STATUS ReadPhysical64( UINT64 Address, UINT64 *Value ) {
 
 EFI_STATUS TranslateVirtual( UINT64 Cr3, UINT64 Va, UINT64 *Pa ) {
   UINT64 Entry;
-  UINT64 Base = Cr3 & PhysicalMask();
+  UINT64 Base;
+
+  // Bits 63:47 must all match for 4 level paging
+  if ( ( Va >> 47 ) != 0 && ( Va >> 47 ) != 0x1FFFFULL ) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  Base = Cr3 & PhysicalMask();
 
   if ( ReadPhysical64( Base + ( ( ( Va >> 39 ) & 0x1FF ) * 8 ), &Entry ) != EFI_SUCCESS ||
        ( Entry & PTE_PRESENT ) == 0 ) {
