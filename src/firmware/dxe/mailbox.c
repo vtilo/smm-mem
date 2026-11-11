@@ -1,4 +1,5 @@
 #include "internal.h"
+#include <stddef.h>
 
 #pragma intrinsic( _InterlockedCompareExchange )
 #pragma intrinsic( _InterlockedExchange )
@@ -134,7 +135,9 @@ EFI_STATUS ConfigureSmm( VOID ) {
   UINT32 Attempt;
   BOOLEAN LogIt;
   EFI_STATUS Status;
-  UINTN CommSize;
+  const UINTN ConfigFrameSize = offsetof( EFI_SMM_COMMUNICATE_HEADER, Data ) + sizeof( CONFIG );
+  const UINTN CommCapacity = sizeof( EFI_SMM_COMMUNICATE_HEADER ) + sizeof( CONFIG ) + 16;
+  UINTN CommSize = CommCapacity;
 
   Attempt = ++Dxe.ConfigureAttempts;
   LogIt = ( Attempt <= 3 );
@@ -157,7 +160,6 @@ EFI_STATUS ConfigureSmm( VOID ) {
     return EFI_ERROR( Status ) ? Status : EFI_NOT_FOUND;
   }
 
-  CommSize = sizeof( EFI_SMM_COMMUNICATE_HEADER ) + sizeof( CONFIG ) + 16;
   CommRegion = AcquireSmmCommRegion( CommSize, LogIt );
 
   if ( CommRegion == 0 ) {
@@ -182,7 +184,12 @@ EFI_STATUS ConfigureSmm( VOID ) {
   Status = SmmComm->Communicate( SmmComm, Header, &CommSize );
 
   if ( !EFI_ERROR( Status ) ) {
-    Status = Config->Status;
+    if ( CommSize < ConfigFrameSize || CommSize > CommCapacity ||
+         Header->MessageLength != sizeof( CONFIG ) ) {
+      Status = EFI_INVALID_PARAMETER;
+    } else {
+      Status = Config->Status;
+    }
   }
 
   _InterlockedExchange( ( volatile long * )&CommRegion->Type, EFI_CONVENTIONAL_MEMORY );
