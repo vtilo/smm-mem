@@ -12,6 +12,25 @@ VOID LocateSmmCpu( VOID ) {
   }
 }
 
+static EFI_STATUS CheckGuestPaging( UINTN CpuIndex ) {
+  UINT32 Cr4;
+
+  if ( !Smm.SupportsLa57 ) {
+    return EFI_SUCCESS;
+  }
+
+  LocateSmmCpu();
+  // Some Intel save maps expose only the low four bytes of CR4. Those bytes include LA57
+  if ( Smm.Cpu == 0 || Smm.Cpu->ReadSaveState == 0 ||
+       Smm.Cpu->ReadSaveState( Smm.Cpu, sizeof( Cr4 ), SAVE_STATE_CR4, CpuIndex, &Cr4 ) !=
+         EFI_SUCCESS ||
+       ( Cr4 & CR4_LA57 ) != 0 ) {
+    return EFI_UNSUPPORTED;
+  }
+
+  return EFI_SUCCESS;
+}
+
 EFI_STATUS ReadSavedCr3( UINTN CpuIndex, UINT64 *Cr3 ) {
   LocateSmmCpu();
 
@@ -20,7 +39,7 @@ EFI_STATUS ReadSavedCr3( UINTN CpuIndex, UINT64 *Cr3 ) {
          EFI_SUCCESS &&
        *Cr3 != 0 ) {
     *Cr3 &= PAGE_MASK;
-    return EFI_SUCCESS;
+    return CheckGuestPaging( CpuIndex );
   }
 
   return EFI_NOT_FOUND;
@@ -188,6 +207,11 @@ EFI_STATUS InitKernel( VOID ) {
 }
 
 EFI_STATUS ResolveProcessLayout( VOID ) {
+  EFI_STATUS Status = CheckGuestPaging( Smm.Table->CurrentlyExecutingCpu );
+  if ( EFI_ERROR( Status ) ) {
+    return Status;
+  }
+
   if ( Smm.PidOffset != 0 && Smm.LinksOffset != 0 && Smm.Cr3Offset != 0 ) {
     return EFI_SUCCESS;
   }

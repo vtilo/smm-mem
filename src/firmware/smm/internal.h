@@ -25,8 +25,10 @@
 #define PTE_LARGE ( 1ULL << 7 )
 #define PAGE_TABLE_FLAGS ( PTE_PRESENT | PTE_RW )
 #define CR0_WP ( 1ULL << 16 )
+#define CR4_LA57 ( 1U << 12 )
 #define MSR_LSTAR 0xC0000082U
 #define SAVE_STATE_CR3 53U
+#define SAVE_STATE_CR4 54U
 #define PROCESS_HINT_COUNT 4U
 
 typedef struct EFI_SMM_CPU_PROTOCOL EFI_SMM_CPU_PROTOCOL;
@@ -68,6 +70,8 @@ typedef struct {
   UINT32 PebOffset;
   UINT32 Cr3Offset;
   UINT64 PhysicalMask;
+  BOOLEAN SupportsLa57;
+  BOOLEAN Supports1GbPages;
   UINT32 MapReady;
   UINT64 MapWindow;
   UINT64 MapPdpt;
@@ -90,6 +94,7 @@ EFI_STATUS TransferBuffer( REQUEST *Request, UINT64 *Transferred );
 EFI_STATUS QueryBuffer( REQUEST *Request, UINT64 *Result, UINT32 *Size );
 
 VOID WritePte( volatile UINT64 *Entry, UINT64 Value );
+VOID InitPagingCapabilities( VOID );
 BOOLEAN IsKernelPointer( UINT64 Value );
 BOOLEAN IsUserPointer( UINT64 Value );
 EFI_STATUS InitMapWindow( VOID );

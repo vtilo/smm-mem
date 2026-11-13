@@ -37,17 +37,19 @@ static EFI_STATUS ValidateRange( UINT64 Cr3, UINT64 Address, UINT32 Size ) {
 }
 
 EFI_STATUS ResolveCallerBuffer( const REQUEST *Request, UINT32 Size, ProcessContext *Caller ) {
+  EFI_STATUS Status;
+
   if ( Size == 0 || Size > BUFFER_TRANSFER_SIZE || Request->CallerPid == 0 ||
        Request->CallerPid == 4 || !ValidUserRange( Request->Buffer, Size ) ) {
     return EFI_INVALID_PARAMETER;
   }
 
-  if ( ResolveProcess( Request->CallerPid, Caller ) != EFI_SUCCESS ||
-       ValidateRange( Caller->Cr3, Request->Buffer, Size ) != EFI_SUCCESS ) {
-    return EFI_NOT_FOUND;
+  Status = ResolveProcess( Request->CallerPid, Caller );
+  if ( EFI_ERROR( Status ) ) {
+    return Status;
   }
 
-  return EFI_SUCCESS;
+  return ValidateRange( Caller->Cr3, Request->Buffer, Size );
 }
 
 static EFI_STATUS MapRange( TransferRange *Range, UINT64 Offset, UINT64 *Physical ) {

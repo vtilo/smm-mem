@@ -1,6 +1,22 @@
 #include "internal.h"
 #include "mapping.h"
 
+VOID InitPagingCapabilities( VOID ) {
+  int Regs[4];
+
+  __cpuidex( Regs, 0, 0 );
+  if ( ( UINT32 )Regs[0] >= 7U ) {
+    __cpuidex( Regs, 7, 0 );
+    Smm.SupportsLa57 = ( ( UINT32 )Regs[2] & ( 1U << 16 ) ) != 0;
+  }
+
+  __cpuidex( Regs, 0x80000000, 0 );
+  if ( ( UINT32 )Regs[0] >= 0x80000001U ) {
+    __cpuidex( Regs, 0x80000001, 0 );
+    Smm.Supports1GbPages = ( ( UINT32 )Regs[3] & ( 1U << 26 ) ) != 0;
+  }
+}
+
 VOID WritePte( volatile UINT64 *Entry, UINT64 Value ) {
   UINT64 Cr0;
 
@@ -26,6 +42,11 @@ EFI_STATUS InitMapWindow( VOID ) {
   UINT64 Cr3;
   UINT64 Mask;
   UINTN Index;
+
+  // The window requires four paging levels and a 1 GiB leaf
+  if ( !Smm.Supports1GbPages || ( __readcr4() & CR4_LA57 ) != 0 ) {
+    return EFI_UNSUPPORTED;
+  }
 
   if ( Smm.MapReady != 0 ) {
     return EFI_SUCCESS;

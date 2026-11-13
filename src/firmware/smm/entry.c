@@ -15,6 +15,7 @@ EFI_STATUS EFIAPI SmmEntry( EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTabl
   Status = InitSmm();
 
   if ( !EFI_ERROR( Status ) ) {
+    InitPagingCapabilities();
     Status = RegisterConfigComm();
     ( void )Status;
     Status = ConfigureFromPublishedTable();

@@ -154,11 +154,13 @@ EFI_STATUS ResolveProcess( UINT32 Pid, ProcessContext *Process ) {
   UINT64 Head;
   UINT64 Link;
   UINT32 Guard;
+  EFI_STATUS LayoutStatus;
 
   MemoryClear( Process, sizeof( *Process ) );
 
-  if ( ResolveProcessLayout() != EFI_SUCCESS ) {
-    return EFI_NOT_FOUND;
+  LayoutStatus = ResolveProcessLayout();
+  if ( EFI_ERROR( LayoutStatus ) ) {
+    return LayoutStatus;
   }
 
   if ( Pid == 4 ) {
