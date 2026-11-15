@@ -37,7 +37,7 @@ EFI_STATUS ReadSavedCr3( UINTN CpuIndex, UINT64 *Cr3 ) {
   if ( Smm.Cpu != 0 && Smm.Cpu->ReadSaveState != 0 &&
        Smm.Cpu->ReadSaveState( Smm.Cpu, sizeof( *Cr3 ), SAVE_STATE_CR3, CpuIndex, Cr3 ) ==
          EFI_SUCCESS &&
-       *Cr3 != 0 ) {
+       ( *Cr3 & PAGE_MASK ) != 0 ) {
     *Cr3 &= PAGE_MASK;
     return CheckGuestPaging( CpuIndex );
   }
@@ -180,6 +180,7 @@ EFI_STATUS InitKernel( VOID ) {
   UINT64 Lstar;
   UINT64 Cr3;
   UINTN Cpu;
+  EFI_STATUS DiscoveryStatus = EFI_UNSUPPORTED;
 
   if ( Smm.KernelBase != 0 && Smm.SystemProcess != 0 ) {
     if ( Smm.KernelStable || ResolveCr3Offset() == EFI_SUCCESS ) {
@@ -190,20 +191,25 @@ EFI_STATUS InitKernel( VOID ) {
   Lstar = __readmsr( MSR_LSTAR );
 
   for ( Cpu = 0; Cpu < Smm.Table->NumberOfCpus; Cpu++ ) {
-    if ( ReadSavedCr3( Cpu, &Cr3 ) == EFI_SUCCESS && Cr3 < 0x100000000ULL &&
-         TryKernelCr3( Cr3, Lstar ) == EFI_SUCCESS ) {
-      return EFI_SUCCESS;
+    if ( ReadSavedCr3( Cpu, &Cr3 ) == EFI_SUCCESS && Cr3 < 0x100000000ULL ) {
+      DiscoveryStatus = TryKernelCr3( Cr3, Lstar );
+      if ( !EFI_ERROR( DiscoveryStatus ) ) {
+        return DiscoveryStatus;
+      }
     }
   }
 
   for ( Cpu = 0; Cpu < Smm.Table->NumberOfCpus; Cpu++ ) {
-    if ( ReadSavedCr3( Cpu, &Cr3 ) == EFI_SUCCESS && TryKernelCr3( Cr3, Lstar ) == EFI_SUCCESS ) {
-      return EFI_SUCCESS;
+    if ( ReadSavedCr3( Cpu, &Cr3 ) == EFI_SUCCESS ) {
+      DiscoveryStatus = TryKernelCr3( Cr3, Lstar );
+      if ( !EFI_ERROR( DiscoveryStatus ) ) {
+        return DiscoveryStatus;
+      }
     }
   }
 
-  Cr3 = __readcr3() & PAGE_MASK;
-  return TryKernelCr3( Cr3, Lstar );
+  // The live CR3 belongs to SMM. Windows discovery needs the guest CR3 saved on entry
+  return DiscoveryStatus;
 }
 
 EFI_STATUS ResolveProcessLayout( VOID ) {
@@ -216,8 +222,12 @@ EFI_STATUS ResolveProcessLayout( VOID ) {
     return EFI_SUCCESS;
   }
 
-  if ( InitKernel() != EFI_SUCCESS || ResolveListLayout() != EFI_SUCCESS ||
-       ResolveCr3Offset() != EFI_SUCCESS ) {
+  Status = InitKernel();
+  if ( EFI_ERROR( Status ) ) {
+    return Status;
+  }
+
+  if ( ResolveListLayout() != EFI_SUCCESS || ResolveCr3Offset() != EFI_SUCCESS ) {
     return EFI_NOT_FOUND;
   }
 
