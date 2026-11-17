@@ -3,12 +3,18 @@
 EFI_STATUS ReadLdrEntry(
   UINT64 Cr3, UINT64 Link, UINT32 Bias, char *Name, UINTN NameSize, UINT64 *Base, UINT32 *Size ) {
   if ( ReadVirtual64( Cr3, Link + 0x30 - Bias, Base ) != EFI_SUCCESS ||
-       ReadVirtual32( Cr3, Link + 0x40 - Bias, Size ) != EFI_SUCCESS || !IsUserPointer( *Base ) ||
-       ReadUnicodeName( Cr3, Link + 0x58 - Bias, Name, NameSize ) != EFI_SUCCESS ) {
+       ReadVirtual32( Cr3, Link + 0x40 - Bias, Size ) != EFI_SUCCESS || !IsUserPointer( *Base ) ) {
     return EFI_NOT_FOUND;
   }
 
-  return EFI_SUCCESS;
+  return ReadUnicodeName( Cr3, Link + 0x58 - Bias, Name, NameSize, 0 );
+}
+
+static BOOLEAN ModuleNameMatches( EFI_STATUS Status, const char *DisplayName, const char *Name ) {
+  if ( Name[0] == 0 ) {
+    return Status == EFI_SUCCESS || Status == EFI_UNSUPPORTED;
+  }
+  return Status == EFI_SUCCESS && SameName( DisplayName, Name );
 }
 
 EFI_STATUS FindUserModule( UINT32 Pid, const char *Name, MODULE_INFO *Module ) {
@@ -41,10 +47,9 @@ EFI_STATUS FindUserModule( UINT32 Pid, const char *Name, MODULE_INFO *Module ) {
 
       MemoryClear( ModuleName, sizeof( ModuleName ) );
 
-      if ( ReadLdrEntry(
-             Process.Cr3, Link, Biases[Index], ModuleName, sizeof( ModuleName ), &Base, &Size ) ==
-             EFI_SUCCESS &&
-           ( Name[0] == 0 || SameName( ModuleName, Name ) ) ) {
+      EFI_STATUS Status = ReadLdrEntry(
+        Process.Cr3, Link, Biases[Index], ModuleName, sizeof( ModuleName ), &Base, &Size );
+      if ( ModuleNameMatches( Status, ModuleName, Name ) ) {
         MemoryClear( Module, sizeof( *Module ) );
         Module->Pid = Pid;
         Module->Base = Base;
@@ -85,9 +90,10 @@ EFI_STATUS ResolveKernelModule( const char *Name, MODULE_INFO *Module ) {
 
     if ( ReadVirtual64( Smm.KernelCr3, Link + 0x30, &Base ) == EFI_SUCCESS &&
          ReadVirtual32( Smm.KernelCr3, Link + 0x40, &Size ) == EFI_SUCCESS &&
-         ReadUnicodeName( Smm.KernelCr3, Link + 0x58, ModuleName, sizeof( ModuleName ) ) ==
-           EFI_SUCCESS &&
-         ( Name[0] == 0 || SameName( ModuleName, Name ) ) ) {
+         ModuleNameMatches(
+           ReadUnicodeName( Smm.KernelCr3, Link + 0x58, ModuleName, sizeof( ModuleName ), 0 ),
+           ModuleName,
+           Name ) ) {
       MemoryClear( Module, sizeof( *Module ) );
       Module->Pid = 4;
       Module->Base = Base;

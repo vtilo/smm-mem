@@ -114,7 +114,8 @@ BOOLEAN SameName( const char *A, const char *B );
 const char *BaseName( const char *Path );
 BOOLEAN SameBaseName( const char *Path, const char *Name );
 EFI_STATUS ReadAscii( UINT64 Cr3, UINT64 Va, char *Out, UINTN OutSize );
-EFI_STATUS ReadUnicodeName( UINT64 Cr3, UINT64 StringAddress, char *Out, UINTN OutSize );
+EFI_STATUS ReadUnicodeName(
+  UINT64 Cr3, UINT64 StringAddress, char *Out, UINTN OutSize, BOOLEAN MatchBaseName );
 EFI_STATUS ResolveExport( UINT64 Cr3, UINT64 Base, const char *Name, UINT64 *Address );
 VOID LocateSmmCpu( VOID );
 EFI_STATUS ReadSavedCr3( UINTN CpuIndex, UINT64 *Cr3 );

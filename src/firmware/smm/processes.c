@@ -87,7 +87,31 @@ EFI_STATUS ReadProcessImagePath( UINT64 Eprocess, UINT64 Cr3, char *Out, UINTN O
     return EFI_NOT_FOUND;
   }
 
-  return ReadUnicodeName( Cr3, Params + 0x60, Out, OutSize );
+  return ReadUnicodeName( Cr3, Params + 0x60, Out, OutSize, 1 );
+}
+
+static EFI_STATUS ReadShortProcessName( UINT64 Eprocess, char *Out ) {
+  // Windows can truncate this field after 15 bytes. Use a full field for display only
+  UINT8 Bytes[15];
+  UINTN Index;
+  EFI_STATUS Status = EFI_SUCCESS;
+
+  if ( Smm.NameOffset == 0 ||
+       CopyVirtual( Smm.KernelCr3, Eprocess + Smm.NameOffset, Bytes, sizeof( Bytes ), 0 ) !=
+         EFI_SUCCESS ) {
+    return EFI_NOT_FOUND;
+  }
+
+  for ( Index = 0; Index < sizeof( Bytes ) && Bytes[Index] != 0; Index++ ) {
+    if ( Bytes[Index] > 0x7F ) {
+      Out[Index] = '?';
+      Status = EFI_UNSUPPORTED;
+    } else {
+      Out[Index] = ( char )Bytes[Index];
+    }
+  }
+  Out[Index] = 0;
+  return Index == sizeof( Bytes ) ? EFI_UNSUPPORTED : Status;
 }
 
 EFI_STATUS FillProcessInfo( UINT64 Eprocess, PROCESS_INFO *Info ) {
@@ -106,17 +130,13 @@ EFI_STATUS FillProcessInfo( UINT64 Eprocess, PROCESS_INFO *Info ) {
   Info->Eprocess = Eprocess;
   Info->Cr3 = Cr3;
 
-  if ( Smm.NameOffset != 0 ) {
-    CopyVirtual(
-      Smm.KernelCr3, Eprocess + Smm.NameOffset, Info->Name, sizeof( Info->Name ) - 1, 0 );
-    Info->Name[sizeof( Info->Name ) - 1] = 0;
-  }
-
   FindImageBase( Eprocess, Cr3, &Info->ImageBase );
   MemoryClear( ImagePath, sizeof( ImagePath ) );
 
   if ( ReadProcessImagePath( Eprocess, Cr3, ImagePath, sizeof( ImagePath ) ) == EFI_SUCCESS ) {
     CopyText( Info->Name, sizeof( Info->Name ), BaseName( ImagePath ) );
+  } else {
+    ( void )ReadShortProcessName( Eprocess, Info->Name );
   }
 
   return EFI_SUCCESS;
@@ -240,15 +260,12 @@ EFI_STATUS FindProcessName( const char *Name, PROCESS_INFO *Info ) {
   char ImagePath[260];
   UINT64 Cr3;
 
-  if ( ResolveProcessLayout() != EFI_SUCCESS || Smm.NameOffset == 0 ) {
+  if ( Name[0] == 0 || ResolveProcessLayout() != EFI_SUCCESS || Smm.NameOffset == 0 ) {
     return EFI_NOT_FOUND;
   }
 
-  MemoryClear( CurrentName, sizeof( CurrentName ) );
-  CopyVirtual(
-    Smm.KernelCr3, Smm.SystemProcess + Smm.NameOffset, CurrentName, sizeof( CurrentName ) - 1, 0 );
-
-  if ( SameName( CurrentName, Name ) ) {
+  if ( ReadShortProcessName( Smm.SystemProcess, CurrentName ) == EFI_SUCCESS &&
+       SameName( CurrentName, Name ) ) {
     return FillProcessInfo( Smm.SystemProcess, Info );
   }
 
@@ -261,19 +278,11 @@ EFI_STATUS FindProcessName( const char *Name, PROCESS_INFO *Info ) {
   for ( Guard = 0; Guard < 4096 && IsKernelPointer( Link ) && Link != Head; Guard++ ) {
     UINT64 Eprocess = Link - Smm.LinksOffset;
 
-    MemoryClear( CurrentName, sizeof( CurrentName ) );
-    CopyVirtual(
-      Smm.KernelCr3, Eprocess + Smm.NameOffset, CurrentName, sizeof( CurrentName ) - 1, 0 );
-
-    if ( SameName( CurrentName, Name ) ) {
-      return FillProcessInfo( Eprocess, Info );
-    }
-
     if ( GetProcessCr3( Eprocess, &Cr3 ) == EFI_SUCCESS ) {
-      MemoryClear( ImagePath, sizeof( ImagePath ) );
-
-      if ( ReadProcessImagePath( Eprocess, Cr3, ImagePath, sizeof( ImagePath ) ) == EFI_SUCCESS &&
-           SameBaseName( ImagePath, Name ) ) {
+      EFI_STATUS Status = ReadProcessImagePath( Eprocess, Cr3, ImagePath, sizeof( ImagePath ) );
+      if ( ( Status == EFI_SUCCESS && SameBaseName( ImagePath, Name ) ) ||
+           ( Status == EFI_NOT_FOUND && ReadShortProcessName( Eprocess, CurrentName ) == EFI_SUCCESS &&
+             SameName( CurrentName, Name ) ) ) {
         return FillProcessInfo( Eprocess, Info );
       }
     }

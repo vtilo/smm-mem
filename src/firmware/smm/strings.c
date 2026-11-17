@@ -57,8 +57,8 @@ EFI_STATUS ReadAscii( UINT64 Cr3, UINT64 Va, char *Out, UINTN OutSize ) {
     return EFI_INVALID_PARAMETER;
   }
 
-  while ( Done + 1 < OutSize ) {
-    UINTN Count = OutSize - Done - 1;
+  while ( Done < OutSize ) {
+    UINTN Count = OutSize - Done;
     UINTN PageLeft = ( UINTN )( PAGE_SIZE - ( ( Va + Done ) & ( PAGE_SIZE - 1 ) ) );
     UINTN I;
 
@@ -78,16 +78,21 @@ EFI_STATUS ReadAscii( UINT64 Cr3, UINT64 Va, char *Out, UINTN OutSize ) {
       if ( Out[Done + I] == 0 ) {
         return EFI_SUCCESS;
       }
+      if ( ( UINT8 )Out[Done + I] > 0x7F ) {
+        return EFI_UNSUPPORTED;
+      }
     }
 
     Done += Count;
   }
 
-  Out[Done] = 0;
-  return EFI_SUCCESS;
+  // The added NUL terminates the display buffer. It cannot confirm an exact match
+  Out[OutSize - 1] = 0;
+  return EFI_UNSUPPORTED;
 }
 
-EFI_STATUS ReadUnicodeName( UINT64 Cr3, UINT64 StringAddress, char *Out, UINTN OutSize ) {
+EFI_STATUS ReadUnicodeName(
+  UINT64 Cr3, UINT64 StringAddress, char *Out, UINTN OutSize, BOOLEAN MatchBaseName ) {
   struct {
     UINT16 Length;
     UINT16 MaximumLength;
@@ -96,6 +101,8 @@ EFI_STATUS ReadUnicodeName( UINT64 Cr3, UINT64 StringAddress, char *Out, UINTN O
   } String;
   UINTN Count;
   UINTN Done = 0;
+  BOOLEAN NonAscii = 0;
+  BOOLEAN Truncated;
 
   if ( OutSize == 0 ||
        CopyVirtual( Cr3, StringAddress, &String, sizeof( String ), 0 ) != EFI_SUCCESS ||
@@ -105,7 +112,12 @@ EFI_STATUS ReadUnicodeName( UINT64 Cr3, UINT64 StringAddress, char *Out, UINTN O
 
   Count = String.Length / 2;
 
-  if ( Count + 1 > OutSize ) {
+  if ( ( String.Length & 1 ) != 0 || String.Length > String.MaximumLength ) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  Truncated = Count >= OutSize;
+  if ( Truncated ) {
     Count = OutSize - 1;
   }
 
@@ -123,12 +135,24 @@ EFI_STATUS ReadUnicodeName( UINT64 Cr3, UINT64 StringAddress, char *Out, UINTN O
     }
 
     for ( I = 0; I < Chunk; I++ ) {
-      Out[Done + I] = ( char )( Chars[I] & 0xFF );
+      if ( Chars[I] == 0 ) {
+        return EFI_INVALID_PARAMETER;
+      }
+      if ( Chars[I] > 0x7F ) {
+        Out[Done + I] = '?';
+        NonAscii = 1;
+      } else {
+        Out[Done + I] = ( char )Chars[I];
+        if ( MatchBaseName && ( Chars[I] == '\\' || Chars[I] == '/' ) ) {
+          // Process name comparisons use only the last path component
+          NonAscii = 0;
+        }
+      }
     }
 
     Done += Chunk;
   }
 
   Out[Done] = 0;
-  return EFI_SUCCESS;
+  return Truncated || NonAscii ? EFI_UNSUPPORTED : EFI_SUCCESS;
 }
